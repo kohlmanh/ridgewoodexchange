@@ -1,0 +1,17 @@
+{
+  "files": {
+    "main.css": "/ridgewoodexchange/static/css/main.56359c72.css",
+    "main.js": "/ridgewoodexchange/static/js/main.a3d3d02a.js",
+    "static/js/952.915a6861.chunk.js": "/ridgewoodexchange/static/js/952.915a6861.chunk.js",
+    "static/js/453.31f58322.chunk.js": "/ridgewoodexchange/static/js/453.31f58322.chunk.js",
+    "index.html": "/ridgewoodexchange/index.html",
+    "main.56359c72.css.map": "/ridgewoodexchange/static/css/main.56359c72.css.map",
+    "main.a3d3d02a.js.map": "/ridgewoodexchange/static/js/main.a3d3d02a.js.map",
+    "952.915a6861.chunk.js.map": "/ridgewoodexchange/static/js/952.915a6861.chunk.js.map",
+    "453.31f58322.chunk.js.map": "/ridgewoodexchange/static/js/453.31f58322.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.56359c72.css",
+    "static/js/main.a3d3d02a.js"
+  ]
+}
