@@ -1,54 +1,17 @@
-import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { Upload, Info, X, Clock, DollarSign, Users } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useParams, Link } from 'react-router-dom';
+import { ArrowLeft, Upload, Info, X, Clock, DollarSign, Users } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import { updateAnonymousPost } from '../utils/postManagement';
 
-const PostItemPage = () => {
+const EditPostPage = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const queryParams = new URLSearchParams(location.search);
-  
-  // Get listing type from URL query params or default to 'offering'
-  const initialOfferType = queryParams.get('type') === 'requesting' ? 'requesting' : 'offering';
-  
-  // Get initial content type (item vs service)
-  const initialContentType = queryParams.get('contentType') === 'service' ? 'service' : 'item';
-
-  const [formData, setFormData] = useState({
-    // Listing type (offering or requesting)
-    offerType: initialOfferType,
-    
-    // Content type (item or service)
-    contentType: initialContentType,
-    
-    // Common fields for both items and services
-    title: '',
-    description: '',
-    contactMethod: 'email',
-    contactInfo: '',
-    eventId: '',
-    anonymous: true,
-    
-    // Item-specific fields
-    itemCategory: '',
-    condition: 'Good',
-    imageFile: null,
-    imagePreview: null,
-    lookingFor: '',  // What the offerer wants in exchange
-    canOffer: '',    // What the requester can offer in exchange
-    
-    // Service-specific fields
-    serviceCategory: '',
-    experienceLevel: 'Intermediate',
-    availability: '',
-    rateType: 'trade',  // trade, hourly, fixed
-    rateAmount: '',
-    rateNotes: ''
-  });
-
-  const [errors, setErrors] = useState({});
+  const { postId } = useParams();
+  const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
+  const [errors, setErrors] = useState({});
+  const [originalPost, setOriginalPost] = useState(null);
+  
   // Item categories
   const itemCategories = [
     'Books & Media', 'Clothing', 'Electronics', 'Furniture', 
@@ -63,10 +26,102 @@ const PostItemPage = () => {
     'Professional Services', 'Crafts & Handmade', 'Transportation',
     'Cleaning & Organization', 'Pet Care', 'Yard & Garden Work', 'Other'
   ];
+  
+  // Initialize form data with default values (will be replaced with post data)
+  const [formData, setFormData] = useState({
+    // Will be populated later when we load the post
+    title: '',
+    description: '',
+    contactMethod: 'email',
+    contactInfo: '',
+    offerType: 'offering',
+    contentType: 'item',
+    itemCategory: '',
+    serviceCategory: '',
+    condition: 'Good',
+    imageFile: null,
+    imagePreview: null,
+    lookingFor: '',
+    canOffer: '',
+    experienceLevel: 'Intermediate',
+    availability: '',
+    rateType: 'trade',
+    rateAmount: '',
+    rateNotes: '',
+    anonymous: true,
+    eventId: ''
+  });
 
-  // Empty events array - will be populated from database in a real implementation
-  const events = [];
+  // Load the post data on component mount
+  useEffect(() => {
+    const loadPost = async () => {
+      try {
+        setLoading(true);
+        
+        // First, try to get info from localStorage (including the anonymousId)
+        const storedEditPost = JSON.parse(localStorage.getItem('editPost') || 'null');
+        
+        if (!storedEditPost || !storedEditPost.id || !storedEditPost.anonymousId) {
+          throw new Error("Post information is missing. Unable to edit this post.");
+        }
+        
+        // Fetch the current post data from Supabase
+        const { data: post, error } = await supabase
+          .from('Posts')
+          .select('*')
+          .eq('id', postId)
+          .single();
+        
+        if (error) throw error;
+        if (!post) throw new Error("Post not found.");
+        
+        // Verify this is the user's post by matching the anonymous ID
+        if (post.anonymous_id !== storedEditPost.anonymousId) {
+          throw new Error("You don't have permission to edit this post.");
+        }
+        
+        // Store the original post data and anonymousId
+        setOriginalPost({
+          ...post,
+          anonymousId: storedEditPost.anonymousId
+        });
+        
+        // Transform the database fields to match our form structure
+        setFormData({
+          title: post.title || '',
+          description: post.description || '',
+          contactMethod: post.contact_method || 'email',
+          contactInfo: post.contact_info || '',
+          offerType: post.offer_type || 'offering',
+          contentType: post.content_type || 'item',
+          itemCategory: post.content_type === 'item' ? post.category : '',
+          serviceCategory: post.content_type === 'service' ? post.category : '',
+          condition: post.condition || 'Good',
+          imagePreview: post.image_url || null,
+          imageFile: null, // Can't load the file itself, only the URL
+          lookingFor: post.looking_for || '',
+          canOffer: post.can_offer || '',
+          experienceLevel: post.experience_level || 'Intermediate',
+          availability: post.availability || '',
+          rateType: post.rate_type || 'trade',
+          rateAmount: post.rate_amount || '',
+          rateNotes: post.rate_notes || '',
+          anonymous: post.is_anonymous,
+          eventId: post.event_id || ''
+        });
+      } catch (error) {
+        console.error('Error loading post:', error);
+        alert(error.message || 'Error loading post for editing. Please try again.');
+        navigate('/my-posts');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadPost();
+  }, [postId, navigate]);
 
+  // Handle form field changes
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData(prev => ({
@@ -80,6 +135,7 @@ const PostItemPage = () => {
     }
   };
 
+  // Handle image changes
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -94,9 +150,10 @@ const PostItemPage = () => {
     }));
   };
 
+  // Remove selected image
   const removeImage = () => {
     // Revoke the URL to prevent memory leaks
-    if (formData.imagePreview) {
+    if (formData.imagePreview && !formData.imagePreview.startsWith('http')) {
       URL.revokeObjectURL(formData.imagePreview);
     }
     
@@ -107,6 +164,7 @@ const PostItemPage = () => {
     }));
   };
 
+  // Validate form fields
   const validate = () => {
     const newErrors = {};
     
@@ -142,11 +200,11 @@ const PostItemPage = () => {
     
     const fileExt = file.name.split('.').pop();
     const fileName = `${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
-    const filePath = `${fileName}`;  // Change this line
+    const filePath = `${fileName}`;
     
     try {
       const { data, error } = await supabase.storage
-        .from('post-images')  // Change this line to match your bucket name
+        .from('post-images')
         .upload(filePath, file);
       
       if (error) {
@@ -155,55 +213,47 @@ const PostItemPage = () => {
       
       // Get public URL for the uploaded image
       const { data: publicUrlData } = supabase.storage
-      .from('post-images')  // Change this line to match your bucket name
-      .getPublicUrl(filePath);
+        .from('post-images')
+        .getPublicUrl(filePath);
     
-    return publicUrlData.publicUrl;
-  } catch (error) {
-    console.error('Error uploading image: ', error);
-    return null;
-  }
-};
+      return publicUrlData.publicUrl;
+    } catch (error) {
+      console.error('Error uploading image: ', error);
+      return null;
+    }
+  };
 
-  // Modified for anonymous posting
+  // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    if (!originalPost || !originalPost.anonymousId) {
+      alert('Post information is missing. Unable to update this post.');
+      return;
+    }
     
     if (validate()) {
       setIsSubmitting(true);
       
       try {
-        // Upload image if one is selected (for offering items)
-        let imageUrl = null;
-        if (formData.contentType === 'item' && formData.offerType === 'offering' && formData.imageFile) {
-          imageUrl = await uploadImage(formData.imageFile);
+        // Upload image if a new one is selected
+        let imageUrl = formData.imagePreview;
+        if (formData.imageFile) {
+          const newImageUrl = await uploadImage(formData.imageFile);
+          if (newImageUrl) {
+            imageUrl = newImageUrl;
+          }
         }
         
-      // Use existing anonymousId from localStorage or generate a new one
-const anonymousId = localStorage.getItem('anonymousId') || 
-Math.random().toString(36).substring(2, 15);
-
-// Store it in localStorage for future use
-localStorage.setItem('anonymousId', anonymousId);
-        
         // Prepare data for database submission
-        const submissionData = {
-          // Use anonymous ID instead of user_id for anonymous posts
-          anonymous_id: anonymousId,
-          
-          // Common fields
-          offer_type: formData.offerType,
-          content_type: formData.contentType,
+        const updatedData = {
           title: formData.title,
           description: formData.description,
           contact_method: formData.contactMethod,
           contact_info: formData.contactInfo,
           event_id: formData.eventId || null,
           is_anonymous: formData.anonymous,
-          created_at: new Date().toISOString(),
           image_url: imageUrl,
-          likes: 0,
-          comments: 0,
           
           // Additional fields based on content type
           ...(formData.contentType === 'item' ? {
@@ -221,34 +271,14 @@ localStorage.setItem('anonymousId', anonymousId);
           })
         };
         
-        console.log("Submitting post with data:", submissionData);
+        // Update the post using the anonymous ID
+        await updateAnonymousPost(originalPost.id, originalPost.anonymousId, updatedData);
         
-        // Insert data into Supabase
-        const { data, error } = await supabase
-          .from('Posts')
-          .insert(submissionData)
-          .select();
-        
-        if (error) {
-          throw error;
-        }
-        
-        // Save the anonymousId to localStorage for post management
-        // This allows users to manage their posts without signing in
-        let userPosts = JSON.parse(localStorage.getItem('userPosts') || '[]');
-        userPosts.push({
-          id: data[0].id,
-          anonymousId: anonymousId,
-          title: formData.title,
-          date: new Date().toISOString()
-        });
-        localStorage.setItem('userPosts', JSON.stringify(userPosts));
-        
-        alert('Your listing has been posted successfully!');
-        navigate('/');
+        alert('Your listing has been updated successfully!');
+        navigate('/my-posts');
       } catch (error) {
-        console.error('Error submitting form:', error);
-        alert('There was an error posting your listing. Please try again.');
+        console.error('Error updating post:', error);
+        alert('There was an error updating your listing. Please try again.');
       } finally {
         setIsSubmitting(false);
       }
@@ -280,45 +310,57 @@ localStorage.setItem('anonymousId', anonymousId);
     service: '#1890ff' // Blue for services
   };
 
+  if (loading) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-12 flex justify-center">
+        <div className="animate-spin h-8 w-8 border-t-2 border-b-2 border-blue-500 rounded-full"></div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-6">
-      <h1 className="text-4xl font-bold mb-12 text-center" style={{ color: colors.primary }}>
-        Create Post
-      </h1>
+      <div className="mb-8">
+        <Link to="/my-posts" className="flex items-center text-blue-600 hover:text-blue-800 transition-colors mb-4">
+          <ArrowLeft size={16} className="mr-2" />
+          Back to My Posts
+        </Link>
+        <h1 className="text-4xl font-bold text-center" style={{ color: colors.primary }}>
+          Edit Post
+        </h1>
+      </div>
 
       <form onSubmit={handleSubmit}>
-        {/* Content Type and Offer Type Selection - Horizontal Layout */}
+        {/* Display post type (not editable) */}
         <div className="mb-12">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             {/* Left Side - What are you posting */}
             <div>
               <h2 className="text-2xl mb-6 font-semibold" style={{ color: colors.primary }}>
-                What are you posting?
+                Post Type
               </h2>
               
               <div className="grid grid-cols-2 gap-0 rounded-lg overflow-hidden shadow-sm">
-                <button
-                  type="button"
-                  className="py-4 px-4 font-medium transition-colors"
+                <div
+                  className="py-4 px-4 font-medium"
                   style={{ 
                     backgroundColor: formData.contentType === 'item' ? '#343a40' : colors.lightGray,
-                    color: formData.contentType === 'item' ? colors.white : colors.textSecondary
+                    color: formData.contentType === 'item' ? colors.white : colors.textSecondary,
+                    opacity: 0.8
                   }}
-                  onClick={() => setFormData(prev => ({ ...prev, contentType: 'item' }))}
                 >
                   Physical Item
-                </button>
-                <button
-                  type="button"
-                  className="py-4 px-4 font-medium transition-colors"
+                </div>
+                <div
+                  className="py-4 px-4 font-medium"
                   style={{ 
                     backgroundColor: formData.contentType === 'service' ? colors.lightGray : colors.lightGray,
-                    color: formData.contentType === 'service' ? colors.textPrimary : colors.textSecondary
+                    color: formData.contentType === 'service' ? colors.textPrimary : colors.textSecondary,
+                    opacity: 0.8
                   }}
-                  onClick={() => setFormData(prev => ({ ...prev, contentType: 'service' }))}
                 >
                   Service
-                </button>
+                </div>
               </div>
             </div>
             
@@ -329,31 +371,33 @@ localStorage.setItem('anonymousId', anonymousId);
               </h2>
               
               <div className="grid grid-cols-2 gap-0 rounded-lg overflow-hidden shadow-sm">
-                <button
-                  type="button"
-                  className="py-4 px-4 font-medium transition-colors"
+                <div
+                  className="py-4 px-4 font-medium"
                   style={{ 
                     backgroundColor: formData.offerType === 'offering' ? colors.primary : colors.lightGray,
-                    color: formData.offerType === 'offering' ? colors.white : colors.textSecondary
+                    color: formData.offerType === 'offering' ? colors.white : colors.textSecondary,
+                    opacity: 0.8
                   }}
-                  onClick={() => setFormData(prev => ({ ...prev, offerType: 'offering' }))}
                 >
                   I'm Offering
-                </button>
-                <button
-                  type="button"
-                  className="py-4 px-4 font-medium transition-colors"
+                </div>
+                <div
+                  className="py-4 px-4 font-medium"
                   style={{ 
                     backgroundColor: formData.offerType === 'requesting' ? colors.lightGray : colors.lightGray,
-                    color: formData.offerType === 'requesting' ? colors.textPrimary : colors.textSecondary
+                    color: formData.offerType === 'requesting' ? colors.textPrimary : colors.textSecondary,
+                    opacity: 0.8
                   }}
-                  onClick={() => setFormData(prev => ({ ...prev, offerType: 'requesting' }))}
                 >
                   I'm Requesting
-                </button>
+                </div>
               </div>
             </div>
           </div>
+          <p className="text-sm text-gray-500 mt-2">
+            <Info size={14} className="inline mr-1" />
+            Post type cannot be changed. If you want to change the type, please create a new post.
+          </p>
         </div>
       
         {/* Main form content */}
@@ -488,7 +532,7 @@ localStorage.setItem('anonymousId', anonymousId);
                     onChange={handleChange}
                     rows={3}
                     className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-blue-500 focus:outline-none"
-                    placeholder="Describe what you'd like in exchange for this item (optional). Examples: kitchen tools, garden seeds, help with a project, etc."
+                    placeholder="Describe what you'd like in exchange for this item (optional)."
                   ></textarea>
                 </div>
               </>
@@ -507,7 +551,7 @@ localStorage.setItem('anonymousId', anonymousId);
                   onChange={handleChange}
                   rows={3}
                   className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-blue-500 focus:outline-none"
-                  placeholder="Describe what you can offer in exchange for this item (optional). Examples: other items you have, skills, time, help with projects, etc."
+                  placeholder="Describe what you can offer in exchange for this item (optional)."
                 ></textarea>
               </div>
             )}
@@ -657,17 +701,7 @@ localStorage.setItem('anonymousId', anonymousId);
                 className={`w-full px-4 py-3 border rounded-lg transition-colors ${
                   errors.description ? 'border-red-500' : 'border-gray-200 focus:border-blue-500'
                 } focus:outline-none`}
-                placeholder={
-                  formData.contentType === 'item'
-                    ? (formData.offerType === 'offering' 
-                      ? "Describe your item. Include details like dimensions, brand, age, etc." 
-                      : "Describe what you're looking for with as much detail as possible."
-                    )
-                    : (formData.offerType === 'offering'
-                      ? "Describe the service you can provide. Include details about your experience, approach, etc."
-                      : "Describe the service you're looking for with as much detail as possible."
-                    )
-                }
+                placeholder="Provide a detailed description of your item or service."
               ></textarea>
               {errors.description && <p className="mt-1 text-red-500 text-sm">{errors.description}</p>}
             </div>
@@ -676,7 +710,7 @@ localStorage.setItem('anonymousId', anonymousId);
             {formData.contentType === 'item' && formData.offerType === 'offering' && (
               <div className="mb-6">
                 <label className="block mb-2 text-xl font-semibold" style={{ color: colors.primary }}>
-                  Add Images (optional)
+                  Images
                 </label>
                 
                 {formData.imagePreview ? (
@@ -717,7 +751,7 @@ localStorage.setItem('anonymousId', anonymousId);
               </div>
             )}
 
-            {/* Associated Event (optional) - Removed most events but kept structure */}
+            {/* Associated Event (optional) */}
             <div className="mb-6">
               <label htmlFor="eventId" className="block mb-2 text-xl font-semibold" style={{ color: colors.primary }}>
                 <Users size={20} className="inline mr-2" />
@@ -840,12 +874,10 @@ localStorage.setItem('anonymousId', anonymousId);
             {isSubmitting ? (
               <div className="flex items-center">
                 <div className="animate-spin h-5 w-5 mr-2 border-b-2 border-white rounded-full"></div>
-                Posting...
+                Updating...
               </div>
             ) : (
-              formData.offerType === 'offering' 
-                ? `Post ${formData.contentType === 'service' ? 'Service' : 'Item'}`
-                : `Post Request`
+              'Save Changes'
             )}
           </button>
         </div>
@@ -854,4 +886,4 @@ localStorage.setItem('anonymousId', anonymousId);
   );
 };
 
-export default PostItemPage;
+export default EditPostPage;
