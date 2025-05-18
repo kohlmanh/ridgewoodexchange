@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Upload, Info, X, Clock, DollarSign, Users } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
+import MultiImageUpload from '../components/MultiImageUpload';
+import { uploadMultipleImages, savePostImages } from '../utils/imageUploadHelpers';
 
 const PostItemPage = () => {
   const navigate = useNavigate();
@@ -32,8 +34,8 @@ const PostItemPage = () => {
     // Item-specific fields
     itemCategory: '',
     condition: 'Good',
-    imageFile: null,
-    imagePreview: null,
+    // Replace single imageFile with array of image objects
+    images: [],
     lookingFor: '',  // What the offerer wants in exchange
     canOffer: '',    // What the requester can offer in exchange
     
@@ -67,6 +69,7 @@ const PostItemPage = () => {
   // Empty events array - will be populated from database in a real implementation
   const events = [];
 
+  // Handle form field changes
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData(prev => ({
@@ -80,30 +83,25 @@ const PostItemPage = () => {
     }
   };
 
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    // Create a preview URL for the selected image
-    const previewUrl = URL.createObjectURL(file);
-    
+  const handleContactMethodChange = (method) => {
+    // Clear the contactInfo field when switching contact methods
     setFormData(prev => ({
       ...prev,
-      imageFile: file,
-      imagePreview: previewUrl
+      contactMethod: method,
+      contactInfo: '' // Reset the contact info when changing methods
     }));
+
+    // Clear any errors for the contactInfo field
+    if (errors.contactInfo) {
+      setErrors(prev => ({ ...prev, contactInfo: '' }));
+    }
   };
 
-  const removeImage = () => {
-    // Revoke the URL to prevent memory leaks
-    if (formData.imagePreview) {
-      URL.revokeObjectURL(formData.imagePreview);
-    }
-    
+  // Handle image changes (now using the MultiImageUpload component)
+  const handleImagesChange = (newImages) => {
     setFormData(prev => ({
       ...prev,
-      imageFile: null,
-      imagePreview: null
+      images: newImages
     }));
   };
 
@@ -136,36 +134,7 @@ const PostItemPage = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Upload image to Supabase Storage
-  const uploadImage = async (file) => {
-    if (!file) return null;
-    
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
-    const filePath = `${fileName}`;  // Change this line
-    
-    try {
-      const { data, error } = await supabase.storage
-        .from('post-images')  // Change this line to match your bucket name
-        .upload(filePath, file);
-      
-      if (error) {
-        throw error;
-      }
-      
-      // Get public URL for the uploaded image
-      const { data: publicUrlData } = supabase.storage
-      .from('post-images')  // Change this line to match your bucket name
-      .getPublicUrl(filePath);
-    
-    return publicUrlData.publicUrl;
-  } catch (error) {
-    console.error('Error uploading image: ', error);
-    return null;
-  }
-};
-
-  // Modified for anonymous posting
+  // Modified for handling multiple images
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -173,20 +142,14 @@ const PostItemPage = () => {
       setIsSubmitting(true);
       
       try {
-        // Upload image if one is selected (for offering items)
-        let imageUrl = null;
-        if (formData.contentType === 'item' && formData.offerType === 'offering' && formData.imageFile) {
-          imageUrl = await uploadImage(formData.imageFile);
-        }
-        
-      // Use existing anonymousId from localStorage or generate a new one
-const anonymousId = localStorage.getItem('anonymousId') || 
-Math.random().toString(36).substring(2, 15);
+        // Use existing anonymousId from localStorage or generate a new one
+        const anonymousId = localStorage.getItem('anonymousId') || 
+          Math.random().toString(36).substring(2, 15);
 
-// Store it in localStorage for future use
-localStorage.setItem('anonymousId', anonymousId);
+        // Store it in localStorage for future use
+        localStorage.setItem('anonymousId', anonymousId);
         
-        // Prepare data for database submission
+        // Prepare data for database submission - without images
         const submissionData = {
           // Use anonymous ID instead of user_id for anonymous posts
           anonymous_id: anonymousId,
@@ -201,7 +164,6 @@ localStorage.setItem('anonymousId', anonymousId);
           event_id: formData.eventId || null,
           is_anonymous: formData.anonymous,
           created_at: new Date().toISOString(),
-          image_url: imageUrl,
           likes: 0,
           comments: 0,
           
@@ -221,6 +183,18 @@ localStorage.setItem('anonymousId', anonymousId);
           })
         };
         
+        // For item offerings, set first image as the main image for display in post lists
+        // We'll store all images in the PostImages table
+        if (formData.contentType === 'item' && formData.offerType === 'offering' && formData.images.length > 0) {
+          // Upload all images and get their URLs
+          const uploadedImages = await uploadMultipleImages(formData.images);
+          
+          // Set the first image as the main image for the post
+          if (uploadedImages.length > 0) {
+            submissionData.image_url = uploadedImages[0].url;
+          }
+        }
+        
         console.log("Submitting post with data:", submissionData);
         
         // Insert data into Supabase
@@ -233,11 +207,22 @@ localStorage.setItem('anonymousId', anonymousId);
           throw error;
         }
         
+        const postId = data[0].id;
+        
+        // If we have multiple images, save them to the PostImages table
+        if (formData.contentType === 'item' && formData.offerType === 'offering' && formData.images.length > 0) {
+          // Upload all images and get their URLs
+          const uploadedImages = await uploadMultipleImages(formData.images);
+          
+          // Save the images to the PostImages table
+          await savePostImages(postId, uploadedImages);
+        }
+        
         // Save the anonymousId to localStorage for post management
         // This allows users to manage their posts without signing in
         let userPosts = JSON.parse(localStorage.getItem('userPosts') || '[]');
         userPosts.push({
-          id: data[0].id,
+          id: postId,
           anonymousId: anonymousId,
           title: formData.title,
           date: new Date().toISOString()
@@ -672,52 +657,28 @@ localStorage.setItem('anonymousId', anonymousId);
               {errors.description && <p className="mt-1 text-red-500 text-sm">{errors.description}</p>}
             </div>
 
-            {/* Image Upload (only for offering items) */}
+            {/* Multi-Image Upload (only for offering items) - REPLACED SINGLE IMAGE UPLOAD WITH MULTI-IMAGE */}
             {formData.contentType === 'item' && formData.offerType === 'offering' && (
               <div className="mb-6">
                 <label className="block mb-2 text-xl font-semibold" style={{ color: colors.primary }}>
                   Add Images (optional)
                 </label>
                 
-                {formData.imagePreview ? (
-                  <div className="mb-3">
-                    <div className="relative w-full h-48 bg-gray-50 rounded-lg overflow-hidden border border-gray-200">
-                      <img 
-                        src={formData.imagePreview} 
-                        alt="Preview" 
-                        className="w-full h-full object-contain"
-                      />
-                      <button
-                        type="button"
-                        className="absolute top-2 right-2 bg-white border border-gray-200 text-gray-600 p-2 rounded-full shadow-sm hover:bg-gray-100 transition-colors"
-                        onClick={removeImage}
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div 
-                    className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center cursor-pointer transition-colors hover:border-blue-300 hover:bg-blue-50"
-                    onClick={() => document.getElementById('image-upload').click()}
-                  >
-                    <Upload size={32} className="mx-auto text-blue-400 mb-3" />
-                    <p className="text-gray-600 mb-1">Click to upload an image</p>
-                    <p className="text-gray-400 text-sm">PNG, JPG, or GIF up to 5MB</p>
-                  </div>
-                )}
-                
-                <input
-                  type="file"
-                  id="image-upload"
-                  accept="image/*"
-                  onChange={handleImageChange}
-                  className="hidden"
+                {/* Use the new MultiImageUpload component */}
+                <MultiImageUpload 
+                  images={formData.images}
+                  setImages={(newImages) => setFormData(prev => ({ ...prev, images: newImages }))}
+                  maxImages={5}
                 />
+                
+                <p className="text-gray-500 text-sm mt-1 flex items-start">
+                  <Info size={14} className="inline mr-1 mt-1 flex-shrink-0" />
+                  <span>Add up to 5 images to showcase your item. First image will be the main image.</span>
+                </p>
               </div>
             )}
 
-            {/* Associated Event (optional) - Removed most events but kept structure */}
+            {/* Associated Event (optional) */}
             <div className="mb-6">
               <label htmlFor="eventId" className="block mb-2 text-xl font-semibold" style={{ color: colors.primary }}>
                 <Users size={20} className="inline mr-2" />
@@ -746,108 +707,94 @@ localStorage.setItem('anonymousId', anonymousId);
               </p>
             </div>
 
-            {/* Contact Information */}
+            {/* Contact Method Selection */}
             <div className="mb-6">
               <label className="block mb-2 text-xl font-semibold" style={{ color: colors.primary }}>
-                Contact Preference <span className="text-blue-600">*</span>
+                Preferred Contact Method <span className="text-blue-600">*</span>
               </label>
               
-              <div className="flex space-x-2 mb-3">
+              <div className="grid grid-cols-3 gap-2 mb-3">
                 <button
                   type="button"
-                  className="flex-1 py-3 font-medium rounded-lg transition-colors"
-                  style={{ 
-                    backgroundColor: formData.contactMethod === 'email' ? colors.primaryLight : colors.lightGray,
-                    color: formData.contactMethod === 'email' ? colors.primaryDark : colors.textSecondary
-                  }}
-                  onClick={() => setFormData(prev => ({ ...prev, contactMethod: 'email' }))}
+                  className={`py-3 px-4 font-medium rounded-lg transition-colors ${
+                    formData.contactMethod === 'email' 
+                      ? 'bg-blue-100 text-blue-800 border-blue-200 border-2' 
+                      : 'bg-gray-100 text-gray-700 border-transparent border-2 hover:bg-gray-200'
+                  }`}
+                  onClick={() => handleContactMethodChange('email')}
                 >
                   Email
                 </button>
                 <button
                   type="button"
-                  className="flex-1 py-3 font-medium rounded-lg transition-colors"
-                  style={{ 
-                    backgroundColor: formData.contactMethod === 'phone' ? colors.primaryLight : colors.lightGray,
-                    color: formData.contactMethod === 'phone' ? colors.primaryDark : colors.textSecondary
-                  }}
-                  onClick={() => setFormData(prev => ({ ...prev, contactMethod: 'phone' }))}
+                  className={`py-3 px-4 font-medium rounded-lg transition-colors ${
+                    formData.contactMethod === 'phone' 
+                      ? 'bg-blue-100 text-blue-800 border-blue-200 border-2' 
+                      : 'bg-gray-100 text-gray-700 border-transparent border-2 hover:bg-gray-200'
+                  }`}
+                  onClick={() => handleContactMethodChange('phone')}
                 >
                   Phone
                 </button>
                 <button
                   type="button"
-                  className="flex-1 py-3 font-medium rounded-lg transition-colors"
-                  style={{ 
-                    backgroundColor: formData.contactMethod === 'both' ? colors.primaryLight : colors.lightGray,
-                    color: formData.contactMethod === 'both' ? colors.primaryDark : colors.textSecondary
-                  }}
-                  onClick={() => setFormData(prev => ({ ...prev, contactMethod: 'both' }))}
+                  className={`py-3 px-4 font-medium rounded-lg transition-colors ${
+                    formData.contactMethod === 'chat' 
+                      ? 'bg-blue-100 text-blue-800 border-blue-200 border-2' 
+                      : 'bg-gray-100 text-gray-700 border-transparent border-2 hover:bg-gray-200'
+                  }`}
+                  onClick={() => handleContactMethodChange('chat')}
                 >
-                  Both
+                  In-App Chat
                 </button>
               </div>
               
-              <input
-                type="text"
-                id="contactInfo"
-                name="contactInfo"
-                value={formData.contactInfo}
-                onChange={handleChange}
-                className={`w-full px-4 py-3 border rounded-lg transition-colors ${
-                  errors.contactInfo ? 'border-red-500' : 'border-gray-200 focus:border-blue-500'
-                } focus:outline-none`}
-                placeholder={
-                  formData.contactMethod === 'email' ? "Your email address" :
-                  formData.contactMethod === 'phone' ? "Your phone number" :
-                  "Your email and/or phone number"
-                }
-              />
-              {errors.contactInfo && <p className="mt-1 text-red-500 text-sm">{errors.contactInfo}</p>}
+              <div>
+                <label htmlFor="contactInfo" className="block mb-2 text-sm font-medium text-gray-700">
+                  {formData.contactMethod === 'email' 
+                    ? 'Your Email Address' 
+                    : formData.contactMethod === 'phone' 
+                      ? 'Your Phone Number' 
+                      : 'Username or Preferred Name'
+                  }
+                  <span className="text-blue-600"> *</span>
+                </label>
+                <input
+                  type={formData.contactMethod === 'email' ? 'email' : 'text'}
+                  id="contactInfo"
+                  name="contactInfo"
+                  value={formData.contactInfo}
+                  onChange={handleChange}
+                  className={`w-full px-4 py-3 border rounded-lg transition-colors ${
+                    errors.contactInfo ? 'border-red-500' : 'border-gray-200 focus:border-blue-500'
+                  } focus:outline-none`}
+                  placeholder={
+                    formData.contactMethod === 'email' 
+                      ? 'your@email.com' 
+                      : formData.contactMethod === 'phone' 
+                        ? '(555) 123-4567' 
+                        : 'Enter your preferred contact name'
+                  }
+                />
+                {errors.contactInfo && <p className="mt-1 text-red-500 text-sm">{errors.contactInfo}</p>}
+              </div>
             </div>
 
-            {/* Anonymous Posting */}
-            <div className="mb-8">
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="anonymous"
-                  name="anonymous"
-                  checked={formData.anonymous}
-                  onChange={handleChange}
-                  className="w-5 h-5 text-blue-500 border-gray-300 rounded focus:ring-blue-500"
-                />
-                <label htmlFor="anonymous" className="ml-2 text-gray-700 font-medium">Post anonymously</label>
-              </div>
-              <p className="text-gray-500 text-sm mt-1 ml-7">
-                Your contact info will only be shared with interested parties
-              </p>
+            {/* Submit Button */}
+            <div className="mt-8">
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className={`w-full py-3 px-4 rounded-lg text-white font-medium transition-colors ${
+                  isSubmitting 
+                    ? 'bg-blue-400 cursor-not-allowed' 
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                {isSubmitting ? 'Posting...' : 'Post Listing'}
+              </button>
             </div>
           </div>
-        </div>
-
-        {/* Submit Button */}
-        <div className="mt-8 flex justify-center">
-          <button
-            type="submit" 
-            className="px-12 py-4 rounded-lg font-medium text-lg transition-colors shadow-sm focus:outline-none"
-            style={{ 
-              backgroundColor: colors.primary,
-              color: colors.white
-            }}
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? (
-              <div className="flex items-center">
-                <div className="animate-spin h-5 w-5 mr-2 border-b-2 border-white rounded-full"></div>
-                Posting...
-              </div>
-            ) : (
-              formData.offerType === 'offering' 
-                ? `Post ${formData.contentType === 'service' ? 'Service' : 'Item'}`
-                : `Post Request`
-            )}
-          </button>
         </div>
       </form>
     </div>

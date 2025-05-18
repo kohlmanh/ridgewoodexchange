@@ -1,9 +1,12 @@
+// Integrated PostDetailPage.jsx
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Clock, DollarSign, Users, Info, ThumbsUp, MessageCircle, ArrowLeft, Share } from 'lucide-react';
+import { Clock, DollarSign, Users, Info, ThumbsUp, MessageCircle, ArrowLeft, Share, MapPin, User } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 // Import the Comments component
-import Comments from './Comments';
+import Comments from './PostComments';
+import ImageCarousel from './ImageCarousel';
+import InterestedButton from './InterestedButton';
 
 const PostDetailPage = () => {
   const { id } = useParams();
@@ -12,6 +15,9 @@ const PostDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showShareOptions, setShowShareOptions] = useState(false);
+  const [images, setImages] = useState([]);
+  const [postOwner, setPostOwner] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
 
   // Define theme colors to match your other components
   const colors = {
@@ -32,31 +38,61 @@ const PostDetailPage = () => {
   };
 
   useEffect(() => {
-    const fetchPost = async () => {
+    const fetchPostData = async () => {
       try {
         setLoading(true);
-        const { data, error } = await supabase
+        
+        // Get current user
+        const { data: userData } = await supabase.auth.getUser();
+        setCurrentUser(userData.user);
+        
+        // Fetch post details
+        const { data: postData, error: postError } = await supabase
           .from('Posts')
           .select('*')
           .eq('id', id)
           .single();
-
-        if (error) throw error;
+          
+        if (postError) throw postError;
         
-        if (data) {
-          setPost(data);
-        } else {
-          setError('Post not found');
+        setPost(postData);
+        
+        // Fetch post images
+        const { data: imagesData, error: imagesError } = await supabase
+          .from('PostImages')
+          .select('*')
+          .eq('post_id', id)
+          .order('order', { ascending: true });
+          
+        if (imagesError) throw imagesError;
+        
+        // If we have images, use them; otherwise, use the legacy image_url
+        if (imagesData && imagesData.length > 0) {
+          setImages(imagesData.map(img => img.image_url));
+        } else if (postData.image_url) {
+          setImages([postData.image_url]);
         }
-      } catch (error) {
-        console.error('Error fetching post:', error);
-        setError('Error loading post');
-      } finally {
+        
+        // Fetch post owner details
+        if (postData.user_id) {
+          const { data: ownerData } = await supabase
+            .from('profiles')
+            .select('username, full_name, avatar_url')
+            .eq('id', postData.user_id)
+            .single();
+            
+          setPostOwner(ownerData);
+        }
+        
+        setLoading(false);
+      } catch (err) {
+        console.error('Error fetching post details:', err);
+        setError('Failed to load the post. It may have been removed or you may not have permission to view it.');
         setLoading(false);
       }
     };
-
-    fetchPost();
+    
+    fetchPostData();
   }, [id]);
 
   // Format date for display
@@ -69,22 +105,6 @@ const PostDetailPage = () => {
       hour: 'numeric',
       minute: 'numeric'
     }).format(date);
-  };
-
-  // Handle like button click
-  const handleLike = async () => {
-    try {
-      // Update the likes count in the database
-      const { error } = await supabase.rpc('increment_like_count', { post_id: id });
-      
-      if (error) throw error;
-      
-      // Update local state
-      setPost(prev => ({ ...prev, likes: (prev.likes || 0) + 1 }));
-    } catch (error) {
-      console.error('Error liking post:', error);
-      alert('Failed to like post. Please try again.');
-    }
   };
 
   // Handle share button click
@@ -186,14 +206,13 @@ const PostDetailPage = () => {
 
       {/* Main Content - More responsive grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
-        {/* Left Column: Image or placeholder */}
+        {/* Left Column: Images or placeholder */}
         <div className="md:col-span-1">
-          {post.image_url ? (
+          {images.length > 0 ? (
             <div className="rounded-lg overflow-hidden border border-gray-200">
-              <img 
-                src={post.image_url} 
+              <ImageCarousel 
+                images={images} 
                 alt={post.title} 
-                className="w-full h-auto object-cover"
               />
             </div>
           ) : (
@@ -208,25 +227,13 @@ const PostDetailPage = () => {
 
           {/* Social Interactions */}
           <div className="flex justify-between items-center mt-4 p-3 bg-gray-50 rounded-lg">
-            <div className="flex items-center">
-              <button
-                onClick={handleLike}
-                className="flex items-center px-3 py-1 rounded-full hover:bg-gray-100"
-              >
-                <ThumbsUp size={18} className="mr-1 text-gray-400" />
-                <span className="text-gray-600">{post.likes || 0}</span>
-              </button>
-            </div>
-            <div className="flex items-center">
-              <MessageCircle size={18} className="mr-1 text-gray-400" />
-              <span className="text-gray-600">{post.comments || 0}</span>
-            </div>
-            <div className="relative">
+            <div className="relative ml-auto">
               <button
                 onClick={handleShare}
                 className="flex items-center px-3 py-1 rounded-full hover:bg-gray-100"
               >
                 <Share size={18} className="text-gray-400" />
+                <span className="ml-1 text-gray-600">Share</span>
               </button>
               
               {/* Share Options Dropdown */}
@@ -248,6 +255,44 @@ const PostDetailPage = () => {
               )}
             </div>
           </div>
+
+          {/* Post Owner */}
+          <div className="mt-4 p-4 bg-gray-50 border rounded-lg">
+            <h2 className="font-semibold mb-2">Posted by</h2>
+            <div className="flex items-center">
+              {postOwner?.avatar_url ? (
+                <img 
+                  src={postOwner.avatar_url}
+                  alt={postOwner.username || 'User'}
+                  className="w-10 h-10 rounded-full mr-3 object-cover"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center mr-3">
+                  <User size={20} className="text-blue-600" />
+                </div>
+              )}
+              <div>
+                <p className="font-medium">
+                  {postOwner?.username || postOwner?.full_name || post.user_name || 'Anonymous User'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Interest Button */}
+          {currentUser && currentUser.id === post.user_id ? (
+            <div className="mt-4 bg-gray-100 text-gray-600 p-3 rounded-md text-center">
+              This is your post
+            </div>
+          ) : (
+            <div className="mt-4">
+              <InterestedButton 
+                postId={post.id} 
+                postTitle={post.title}
+                postOwnerId={post.user_id}
+              />
+            </div>
+          )}
         </div>
 
         {/* Right Column: Details */}
@@ -261,6 +306,21 @@ const PostDetailPage = () => {
               <p className="whitespace-pre-line">{post.description}</p>
             </div>
           </div>
+
+          {/* Location (if available) */}
+          {post.location && (
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold mb-3" style={{ color: colors.primary }}>
+                Location
+              </h2>
+              <div className="bg-white p-4 rounded-lg border border-gray-200">
+                <p className="flex items-center">
+                  <MapPin size={16} className="mr-1 text-gray-600" />
+                  {post.location}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Item-specific details */}
           {post.content_type === 'item' && (
@@ -347,37 +407,44 @@ const PostDetailPage = () => {
             </div>
           )}
 
-          {/* Contact Information */}
-          <div className="mb-6">
-            <h2 className="text-xl font-semibold mb-3" style={{ color: colors.primary }}>
-              Contact Information
-            </h2>
-            <div className="bg-white p-4 rounded-lg border border-gray-200">
-              <p className="mb-2">
-                <span className="font-medium">Contact via: </span>
-                {post.contact_method === 'email' ? 'Email' : 
-                 post.contact_method === 'phone' ? 'Phone' : 'Email or Phone'}
-              </p>
-              
-              {!post.is_anonymous && post.contact_info && (
-                <p>{post.contact_info}</p>
-              )}
-              
-              {post.is_anonymous && (
-                <div className="bg-blue-50 p-3 rounded-lg mt-2">
-                  <p className="text-blue-600">Contact information will be shared when you express interest</p>
-                  <button 
-                    className="mt-3 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 w-full"
-                    onClick={() => alert('In a full implementation, this would send a message to the poster!')}
-                  >
-                    I'm Interested
-                  </button>
-                </div>
-              )}
+          {/* Contact Information (if present in your structure) */}
+          {post.contact_method && (
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold mb-3" style={{ color: colors.primary }}>
+                Contact Information
+              </h2>
+              <div className="bg-white p-4 rounded-lg border border-gray-200">
+                <p className="mb-2">
+                  <span className="font-medium">Contact via: </span>
+                  {post.contact_method === 'email' ? 'Email' : 
+                  post.contact_method === 'phone' ? 'Phone' : 'Email or Phone'}
+                </p>
+                
+                {!post.is_anonymous && post.contact_info && (
+                  <p>{post.contact_info}</p>
+                )}
+                
+                {post.is_anonymous && (
+                  <div className="bg-blue-50 p-3 rounded-lg mt-2">
+                    <p className="text-blue-600">Contact information will be shared when you express interest</p>
+                  </div>
+                )}
+              </div>
             </div>
+          )}
+          
+          {/* Safety Tips */}
+          <div className="p-4 mb-6 bg-blue-50 border-t rounded-lg">
+            <h2 className="font-semibold mb-2 text-blue-700">Safety Tips</h2>
+            <ul className="text-sm space-y-1 text-blue-900">
+              <li>• Meet in public places for exchanges</li>
+              <li>• Don't share personal financial information</li>
+              <li>• Review the item before completing exchange</li>
+              <li>• Trust your instincts</li>
+            </ul>
           </div>
           
-          {/* Comments Section - Add this section */}
+          {/* Comments Section */}
           <Comments postId={id} />
         </div>
       </div>
