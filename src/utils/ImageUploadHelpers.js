@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient';
+import { supabase } from '../lib/supabaseClient';
 
 /**
  * Uploads multiple images to Supabase storage and returns an array of public URLs

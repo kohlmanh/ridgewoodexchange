@@ -1,7 +1,7 @@
 // MultiImageUpload.jsx
 import React, { useState, useEffect } from 'react';
 import { X, Upload, Image as ImageIcon } from 'lucide-react';
-import { supabase } from '../supabaseClient'; // Update path as needed
+import { supabase } from '../lib/supabaseClient';
 
 const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
   const [images, setImages] = useState([]);
