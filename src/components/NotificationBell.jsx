@@ -1,7 +1,7 @@
 // NotificationBell.jsx
 import React, { useState, useEffect } from 'react';
 import { Bell } from 'lucide-react';
-import { supabase } from '../supabaseClient'; // Update path as needed
+import { supabase } from '../lib/supabaseClient';
 import { Link } from 'react-router-dom';
 
 const NotificationBell = () => {

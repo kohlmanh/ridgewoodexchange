@@ -1,6 +1,6 @@
 // InterestedButton.jsx
 import React, { useState } from 'react';
-import { supabase } from '../supabaseClient'; // Update path as needed
+import { supabase } from '../lib/supabaseClient';
 
 const InterestedButton = ({ postId, postTitle, postOwnerId }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);

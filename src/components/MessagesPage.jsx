@@ -1,7 +1,7 @@
 // MessagesPage.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient'; // Update path as needed
+import { supabase } from '../lib/supabaseClient';
 import { Send } from 'lucide-react';
 
 const MessagesPage = () => {

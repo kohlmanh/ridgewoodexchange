@@ -1,6 +1,6 @@
 // PostComments.jsx - Integrated version
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../supabaseClient'; // Update path as needed
+import { supabase } from '../lib/supabaseClient';
 
 const PostComments = ({ postId }) => {
   const [comments, setComments] = useState([]);
