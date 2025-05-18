@@ -1,6 +1,5 @@
-// MultiImageUpload.jsx
 import React, { useState, useEffect } from 'react';
-import { X, Upload, Image as ImageIcon } from 'lucide-react';
+import { X, Upload } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 
 const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
@@ -76,13 +75,11 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
         // Generate a unique file path
         const fileExt = file.name.split('.').pop();
         const fileName = `${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
-        const filePath = postId 
-          ? `post-images/${postId}/${fileName}`
-          : `post-images/temp/${fileName}`;
+        const filePath = fileName; // Simplified path
         
-        // Upload the file to Supabase Storage
+        // Upload the file to Supabase Storage - CORRECTED BUCKET NAME FROM 'public' TO 'post-images'
         const { data, error } = await supabase.storage
-          .from('public')
+          .from('post-images')
           .upload(filePath, file, {
             cacheControl: '3600',
             upsert: false,
@@ -99,7 +96,7 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
         
         // Get the public URL for the file
         const { data: { publicUrl } } = supabase.storage
-          .from('public')
+          .from('post-images')
           .getPublicUrl(filePath);
           
         // Add the new image to our array
@@ -161,7 +158,7 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
         // Try to delete the file from storage
         if (imageToRemove.file_path) {
           await supabase.storage
-            .from('public')
+            .from('post-images')  // CORRECTED BUCKET NAME
             .remove([imageToRemove.file_path]);
         }
       } catch (err) {
@@ -169,19 +166,6 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
         // Even if there's an error, we've already removed it from the UI
       }
     }
-  };
-  
-  const reorderImages = (startIndex, endIndex) => {
-    const updatedImages = Array.from(images);
-    const [removed] = updatedImages.splice(startIndex, 1);
-    updatedImages.splice(endIndex, 0, removed);
-    
-    // Update order values
-    updatedImages.forEach((img, idx) => {
-      img.order = idx;
-    });
-    
-    setImages(updatedImages);
   };
   
   // Save all images associated with a post
