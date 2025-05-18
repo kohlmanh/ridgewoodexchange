@@ -3,10 +3,9 @@ import { supabase } from '../lib/supabaseClient';
 /**
  * Uploads multiple images to Supabase storage and returns an array of public URLs
  * @param {Array} imageObjects - Array of objects containing file properties
- * @param {string} bucketName - Name of the Supabase storage bucket
  * @returns {Promise<Array>} - Array of objects with image URLs and metadata
  */
-export const uploadMultipleImages = async (imageObjects, bucketName = 'post-images') => {
+export const uploadMultipleImages = async (imageObjects) => {
   if (!imageObjects || imageObjects.length === 0) {
     return [];
   }
@@ -24,7 +23,7 @@ export const uploadMultipleImages = async (imageObjects, bucketName = 'post-imag
       
       // Upload file to Supabase
       const { data, error } = await supabase.storage
-        .from(bucketName)
+        .from('post-images')
         .upload(filePath, file);
       
       if (error) {
@@ -34,7 +33,7 @@ export const uploadMultipleImages = async (imageObjects, bucketName = 'post-imag
       
       // Get public URL
       const { data: publicUrlData } = supabase.storage
-        .from(bucketName)
+        .from('post-images')
         .getPublicUrl(filePath);
       
       return {
@@ -42,7 +41,7 @@ export const uploadMultipleImages = async (imageObjects, bucketName = 'post-imag
         path: filePath,
         size: file.size,
         type: file.type,
-        order: index // Keep track of the original order
+        order: imageObj.order || index // Keep track of the original order
       };
     });
     
@@ -75,7 +74,7 @@ export const savePostImages = async (postId, imageData) => {
       post_id: postId,
       image_url: image.url,
       storage_path: image.path || '',
-      order_index: image.order || index,
+      order: image.order || index,
       created_at: new Date().toISOString()
     }));
     
