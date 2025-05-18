@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Upload } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 
@@ -7,26 +7,53 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({});
   const [error, setError] = useState(null);
+  const initialRenderComplete = useRef(false);
   
-  // Load existing images when the component mounts or postId changes
+  // Load existing images only on initial render or when postId/existingImages genuinely change
   useEffect(() => {
-    if (existingImages.length > 0) {
-      setImages(existingImages);
-    } else if (postId) {
-      fetchExistingImages();
-    } else {
-      setImages([]);
+    // Skip the first render if existingImages is already empty
+    if (!initialRenderComplete.current) {
+      initialRenderComplete.current = true;
+      if (existingImages.length > 0) {
+        setImages(existingImages);
+      } else if (postId) {
+        fetchExistingImages();
+      }
+      return;
     }
-  }, [postId, existingImages]);
+    
+    // For subsequent renders, only update if there's a real change
+    const currentLength = images.length;
+    const newLength = existingImages.length;
+    
+    // Only update if lengths are different or it's a post ID change
+    if (currentLength !== newLength || postId) {
+      console.log('Significant change in existingImages or postId, updating state');
+      if (existingImages.length > 0) {
+        setImages(existingImages);
+      } else if (postId) {
+        fetchExistingImages();
+      }
+    }
+  }, [postId]); // Remove existingImages from dependency array
   
-  // Whenever images change, notify parent component
+  // Only notify parent component when images change and it's not the initial setup
   useEffect(() => {
-    if (onChange) {
-      onChange(images);
-    }
-  }, [images, onChange]);
+    // Skip if onChange is not provided
+    if (!onChange) return;
+    
+    // Skip the first render effect
+    if (!initialRenderComplete.current) return;
+    
+    // Prevent calling onChange with empty array repeatedly
+    if (images.length === 0 && existingImages.length === 0) return;
+    
+    // Only call if there's a real change to report
+    onChange(images);
+  }, [images]); // Remove onChange from dependency array
   
   const fetchExistingImages = async () => {
+    console.log('Fetching existing images for postId:', postId);
     try {
       const { data, error } = await supabase
         .from('PostImages')
@@ -36,6 +63,7 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
         
       if (error) throw error;
       
+      console.log('Fetched existing images:', data);
       setImages(data || []);
     } catch (err) {
       console.error('Error fetching existing images:', err);
@@ -48,11 +76,24 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
     
     if (!files.length) return;
     
+    console.log('Files selected:', files.map(f => f.name));
     setIsUploading(true);
     setError(null);
     
-    // Create a copy of images to update
+    // Create a deep copy of images to update
     const updatedImages = [...images];
+    const maxImages = 5;
+    
+    // Check if adding these files would exceed the maximum
+    if (updatedImages.length + files.length > maxImages) {
+      setError(`You can only upload a maximum of ${maxImages} images.`);
+      const remainingSlots = Math.max(0, maxImages - updatedImages.length);
+      if (remainingSlots <= 0) {
+        setIsUploading(false);
+        return;
+      }
+      files.splice(remainingSlots);
+    }
     
     // Process each file
     for (let i = 0; i < files.length; i++) {
@@ -75,14 +116,15 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
         // Generate a unique file path
         const fileExt = file.name.split('.').pop();
         const fileName = `${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
-        const filePath = fileName; // Simplified path
         
-        // Upload the file to Supabase Storage - CORRECTED BUCKET NAME FROM 'public' TO 'post-images'
+        console.log(`Uploading file ${file.name} as ${fileName}`);
+        
+        // Upload the file to Supabase Storage
         const { data, error } = await supabase.storage
           .from('post-images')
-          .upload(filePath, file, {
+          .upload(fileName, file, {
             cacheControl: '3600',
-            upsert: false,
+            upsert: true, // Changed to true to allow overwriting
             onUploadProgress: (progress) => {
               const percent = Math.round((progress.loaded / progress.total) * 100);
               setUploadProgress(prev => ({
@@ -92,22 +134,31 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
             }
           });
           
-        if (error) throw error;
+        if (error) {
+          console.error(`Error uploading file ${file.name}:`, error);
+          throw error;
+        }
+        
+        console.log(`Successfully uploaded file ${file.name}`, data);
         
         // Get the public URL for the file
         const { data: { publicUrl } } = supabase.storage
           .from('post-images')
-          .getPublicUrl(filePath);
+          .getPublicUrl(fileName);
           
+        console.log(`Public URL for ${file.name}:`, publicUrl);
+        
+        // Create a preview for immediate display
+        const previewUrl = URL.createObjectURL(file);
+        
         // Add the new image to our array
         updatedImages.push({
           id: uploadId, // Temporary ID for new uploads
           image_url: publicUrl,
+          preview: previewUrl, // Keep preview URL for local display
           order: images.length + i,
-          // For new uploads that don't have a post_id yet, 
-          // we'll need to update these after the post is created
           post_id: postId || null,
-          file_path: filePath, // Store this to help with saving later
+          file_path: fileName,
           is_new: true // Flag for new uploads
         });
       } catch (err) {
@@ -131,6 +182,7 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
   };
   
   const removeImage = async (index) => {
+    console.log(`Removing image at index ${index}`);
     const imageToRemove = images[index];
     
     // Create a copy of images and remove the image at the specified index
@@ -144,10 +196,16 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
     
     setImages(updatedImages);
     
+    // Revoke object URL if it exists to prevent memory leaks
+    if (imageToRemove.preview) {
+      URL.revokeObjectURL(imageToRemove.preview);
+    }
+    
     // If this is an existing image (not a new upload) and we have a post_id,
     // delete it from the database
     if (postId && imageToRemove.id && !imageToRemove.is_new) {
       try {
+        console.log(`Deleting image ${imageToRemove.id} from database`);
         const { error } = await supabase
           .from('PostImages')
           .delete()
@@ -157,8 +215,9 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
         
         // Try to delete the file from storage
         if (imageToRemove.file_path) {
+          console.log(`Deleting file ${imageToRemove.file_path} from storage`);
           await supabase.storage
-            .from('post-images')  // CORRECTED BUCKET NAME
+            .from('post-images')
             .remove([imageToRemove.file_path]);
         }
       } catch (err) {
@@ -178,17 +237,22 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
       return { success: false, error: 'Missing post ID' };
     }
     
+    console.log(`Saving ${images.length} images to post ${postIdToUse}`);
+    
     try {
       // Handle new images that need to be associated with the post
       const newImages = images.filter(img => img.is_new);
+      console.log(`Found ${newImages.length} new images to save`);
       
       for (const image of newImages) {
+        console.log(`Inserting image record for ${image.image_url}`);
         // Insert record in PostImages table
         const { error } = await supabase
           .from('PostImages')
           .insert({
             post_id: postIdToUse,
             image_url: image.image_url,
+            storage_path: image.file_path || '',
             order: image.order
           });
           
@@ -197,8 +261,10 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
       
       // Update order of existing images if needed
       const existingImages = images.filter(img => !img.is_new && img.id);
+      console.log(`Found ${existingImages.length} existing images to update`);
       
       for (const image of existingImages) {
+        console.log(`Updating order for image ${image.id}`);
         const { error } = await supabase
           .from('PostImages')
           .update({ order: image.order })
@@ -207,6 +273,7 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
         if (error) throw error;
       }
       
+      console.log('Successfully saved all images');
       return { success: true };
     } catch (err) {
       console.error('Error saving images to post:', err);
@@ -214,12 +281,20 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
     }
   };
   
+  // Calculate maximum allowed images
+  const maxImages = 5;
+  
   return (
     <div>
       <div className="mb-2">
         <label className="block text-sm font-medium text-gray-700 mb-1">
           Images
         </label>
+        
+        {/* Debug info */}
+        <div className="text-xs text-gray-500 mb-1">
+          {images.length} of {maxImages} images selected
+        </div>
         
         {/* Image Preview Grid */}
         {images.length > 0 && (
@@ -230,7 +305,7 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
                 className="relative group aspect-square border rounded-md overflow-hidden"
               >
                 <img 
-                  src={image.image_url} 
+                  src={image.preview || image.image_url} 
                   alt={`Preview ${index + 1}`}
                   className="w-full h-full object-cover"
                 />
@@ -283,43 +358,45 @@ const MultiImageUpload = ({ postId, existingImages = [], onChange }) => {
         )}
         
         {/* Upload Button */}
-        <div className="mt-2">
-          <label 
-            className={`flex items-center justify-center w-full h-24 border-2 border-dashed rounded-md
-                      hover:bg-gray-50 cursor-pointer transition-colors
-                      ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            <input
-              type="file"
-              multiple
-              accept="image/*"
-              onChange={handleFileChange}
-              className="hidden"
-              disabled={isUploading}
-            />
-            
-            <div className="text-center">
-              {isUploading ? (
-                <div className="flex flex-col items-center">
-                  <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                  <span className="mt-2 text-sm text-gray-500">Uploading...</span>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center">
-                  <Upload size={24} className="text-gray-400" />
-                  <span className="mt-2 text-sm text-gray-500">
-                    {images.length > 0 
-                      ? 'Add more images' 
-                      : 'Click or drag to upload images'}
-                  </span>
-                </div>
-              )}
-            </div>
-          </label>
-        </div>
+        {images.length < maxImages && (
+          <div className="mt-2">
+            <label 
+              className={`flex items-center justify-center w-full h-24 border-2 border-dashed rounded-md
+                        hover:bg-gray-50 cursor-pointer transition-colors
+                        ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <input
+                type="file"
+                multiple
+                accept="image/*"
+                onChange={handleFileChange}
+                className="hidden"
+                disabled={isUploading}
+              />
+              
+              <div className="text-center">
+                {isUploading ? (
+                  <div className="flex flex-col items-center">
+                    <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="mt-2 text-sm text-gray-500">Uploading...</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center">
+                    <Upload size={24} className="text-gray-400" />
+                    <span className="mt-2 text-sm text-gray-500">
+                      {images.length > 0 
+                        ? 'Add more images' 
+                        : 'Click or drag to upload images'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </label>
+          </div>
+        )}
         
         <p className="text-sm text-gray-500 mt-1">
-          You can upload up to 5 images. First image will be the primary image.
+          You can upload up to {maxImages} images. First image will be the primary image.
         </p>
       </div>
       
