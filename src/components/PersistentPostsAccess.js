@@ -1,32 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useUserPosts } from '../utils/storage';
 
 const PersistentPostsAccess = () => {
-  const [hasPosts, setHasPosts] = useState(false);
-
-  // Check if user has any posts saved in localStorage
-  useEffect(() => {
-    try {
-      const userPosts = JSON.parse(localStorage.getItem('userPosts') || '[]');
-      setHasPosts(userPosts.length > 0);
-      
-      // Also set up a listener for storage changes
-      const handleStorageChange = () => {
-        const updatedPosts = JSON.parse(localStorage.getItem('userPosts') || '[]');
-        setHasPosts(updatedPosts.length > 0);
-      };
-      
-      window.addEventListener('storage', handleStorageChange);
-      
-      // Clean up event listener
-      return () => {
-        window.removeEventListener('storage', handleStorageChange);
-      };
-    } catch (error) {
-      console.error('Error checking for posts:', error);
-      setHasPosts(false);
-    }
-  }, []);
+  const { hasPosts } = useUserPosts();
 
   // Only show the component if the user has created posts
   if (!hasPosts) return null;

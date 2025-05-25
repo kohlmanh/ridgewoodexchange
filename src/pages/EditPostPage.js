@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Upload, Info, X, Clock, DollarSign, Users } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
-import { updateAnonymousPost } from '../utils/postManagement';
+import { AppStorage } from '../utils/storage';
 
 const EditPostPage = () => {
   const navigate = useNavigate();
@@ -59,7 +59,7 @@ const EditPostPage = () => {
         setLoading(true);
         
         // First, try to get info from localStorage (including the anonymousId)
-        const storedEditPost = JSON.parse(localStorage.getItem('editPost') || 'null');
+        const storedEditPost = AppStorage.getItem('editPost');
         
         if (!storedEditPost || !storedEditPost.id || !storedEditPost.anonymousId) {
           throw new Error("Post information is missing. Unable to edit this post.");
@@ -271,8 +271,27 @@ const EditPostPage = () => {
           })
         };
         
-        // Update the post using the anonymous ID
-        await updateAnonymousPost(originalPost.id, originalPost.anonymousId, updatedData);
+        // Set the anonymous ID as a configuration parameter
+await supabase.rpc('set_config', {
+  parameter: 'app.anonymous_id',
+  value: originalPost.anonymousId
+});
+
+// Then perform the update operation
+const { data, error } = await supabase
+  .from('Posts')
+  .update(updatedData)
+  .eq('id', originalPost.id)
+  .eq('anonymous_id', originalPost.anonymousId)
+  .select();
+
+if (error) throw error;
+
+// Update the post in local storage
+AppStorage.updateUserPost(originalPost.id, {
+  title: updatedData.title,
+  date: new Date().toISOString()
+});
         
         alert('Your listing has been updated successfully!');
         navigate('/my-posts');

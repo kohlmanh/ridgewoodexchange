@@ -1,11 +1,10 @@
 // Integrated PostDetailPage.jsx
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Clock, DollarSign, Users, Info, ThumbsUp, MessageCircle, ArrowLeft, Share, MapPin, User } from 'lucide-react';
+import { Clock, DollarSign, Users, Info, ArrowLeft, Share, MapPin, User } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 // Import the Comments component
-import Comments from './PostComments';
-import ImageCarousel from './ImageCarousel';
+import PostComments from './PostComments';  // ✅ Correct
 import InterestedButton from './InterestedButton';
 
 const PostDetailPage = () => {
@@ -208,22 +207,35 @@ const PostDetailPage = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
         {/* Left Column: Images or placeholder */}
         <div className="md:col-span-1">
-          {images.length > 0 ? (
-            <div className="rounded-lg overflow-hidden border border-gray-200">
-              <ImageCarousel 
-                images={images} 
-                alt={post.title} 
-              />
-            </div>
-          ) : (
-            <div className="h-48 sm:h-64 rounded-lg flex items-center justify-center" 
-              style={{ backgroundColor: post.content_type === 'item' ? colors.itemRow : colors.serviceRow }}
-            >
-              <div className="text-5xl sm:text-6xl" style={{ color: post.offer_type === 'offering' ? colors.offering : colors.requesting }}>
-                {post.content_type === 'item' ? '📦' : '🔧'}
+          <div className="rounded-lg overflow-hidden border border-gray-200">
+            {/* Main Image */}
+            <div className="relative bg-gray-200 h-96">
+              {images.length > 0 ? (
+                <img 
+                  src={images[0]} 
+                  alt={post.title} 
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                  <div className="text-4xl" style={{ color: post.offer_type === 'offering' ? '#0052cc' : '#9254de' }}>
+                    {post.content_type === 'item' ? '📦' : '🔧'}
+                  </div>
+                </div>
+              )}
+              
+              {/* Tag for item type (offering or seeking) */}
+              <div className={`absolute top-4 left-4 px-4 py-2 rounded-md text-white font-medium ${
+                post.offer_type === 'offering' 
+                  ? post.content_type === 'item' ? 'bg-blue-600' : 'bg-green-600' 
+                  : 'bg-purple-600'
+              }`}>
+                {post.offer_type === 'offering' 
+                  ? `${post.content_type === 'service' ? 'Service' : 'Item'} for Trade` 
+                  : `Wanted: ${post.content_type === 'service' ? 'Service' : 'Item'}`}
               </div>
             </div>
-          )}
+          </div>
 
           {/* Social Interactions */}
           <div className="flex justify-between items-center mt-4 p-3 bg-gray-50 rounded-lg">
@@ -445,7 +457,7 @@ const PostDetailPage = () => {
           </div>
           
           {/* Comments Section */}
-          <Comments postId={id} />
+          <PostComments postId={id} />
         </div>
       </div>
     </div>

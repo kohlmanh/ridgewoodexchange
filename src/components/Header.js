@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
-import NotificationBell from './NotificationBell'; // Update the path if needed
 
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -21,34 +20,22 @@ const Header = () => {
             EXCHANGE
           </div>
 
-          {/* Desktop Navigation with Notification Bell */}
-          <div className="hidden md:flex items-center">
-            <nav className="flex space-x-6 text-blue-700 text-sm font-medium mr-4">
-              <Link to="/" className="hover:underline">HOME</Link>
-              <Link to="/about" className="hover:underline">ABOUT</Link>
-              <Link to="/post" className="hover:underline">POST</Link>
-              <Link to="/communityfeed" className="hover:underline">COMMUNITY FEED</Link>
-            </nav>
-            
-            {/* Notification Bell - Desktop */}
-            <NotificationBell />
-          </div>
+          {/* Desktop Navigation */}
+          <nav className="hidden md:flex space-x-6 text-blue-700 text-sm font-medium">
+            <Link to="/" className="hover:underline">HOME</Link>
+            <Link to="/about" className="hover:underline">ABOUT</Link>
+            <Link to="/post" className="hover:underline">POST</Link>
+            <Link to="/communityfeed" className="hover:underline">COMMUNITY FEED</Link>
+          </nav>
 
-          {/* Mobile Menu Button and Notification Bell */}
-          <div className="md:hidden flex items-center">
-            {/* Notification Bell - Mobile */}
-            <div className="mr-2">
-              <NotificationBell />
-            </div>
-            
-            <button 
-              className="text-blue-700"
-              onClick={toggleMenu}
-              aria-label="Toggle menu"
-            >
-              {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
-            </button>
-          </div>
+          {/* Mobile Menu Button */}
+          <button 
+            className="md:hidden text-blue-700"
+            onClick={toggleMenu}
+            aria-label="Toggle menu"
+          >
+            {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+          </button>
         </div>
 
         {/* Mobile Navigation */}

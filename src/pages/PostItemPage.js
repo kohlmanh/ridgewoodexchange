@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Upload, Info, X, Clock, DollarSign, Users } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
-import MultiImageUpload from '../components/MultiImageUpload';
-import { uploadMultipleImages, savePostImages } from '../utils/imageUploadHelpers';
+import { AppStorage } from '../utils/storage';
 
 const PostItemPage = () => {
   const navigate = useNavigate();
@@ -28,14 +27,16 @@ const PostItemPage = () => {
     description: '',
     contactMethod: 'email',
     contactInfo: '',
+    contactInfoEmail: '',  // New field for 'both' option
+    contactInfoPhone: '',  // New field for 'both' option
     eventId: '',
     anonymous: true,
     
     // Item-specific fields
     itemCategory: '',
     condition: 'Good',
-    // Replace single imageFile with array of image objects
-    images: [],
+    imageFile: null,
+    imagePreview: null,
     lookingFor: '',  // What the offerer wants in exchange
     canOffer: '',    // What the requester can offer in exchange
     
@@ -69,7 +70,7 @@ const PostItemPage = () => {
   // Empty events array - will be populated from database in a real implementation
   const events = [];
 
-  // Handle form field changes
+  //contact info swa ux
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData(prev => ({
@@ -83,13 +84,25 @@ const PostItemPage = () => {
     }
   };
 
+  // Updated handleContactMethodChange function
   const handleContactMethodChange = (method) => {
-    // Clear the contactInfo field when switching contact methods
-    setFormData(prev => ({
-      ...prev,
-      contactMethod: method,
-      contactInfo: '' // Reset the contact info when changing methods
-    }));
+    if (method === 'both') {
+      // When switching to 'both', clear single contactInfo field but keep email/phone specific fields
+      setFormData(prev => ({
+        ...prev,
+        contactMethod: method,
+        contactInfo: ''
+      }));
+    } else {
+      // When switching to 'email' or 'phone', clear all contact fields
+      setFormData(prev => ({
+        ...prev,
+        contactMethod: method,
+        contactInfo: '',
+        contactInfoEmail: '',
+        contactInfoPhone: ''
+      }));
+    }
 
     // Clear any errors for the contactInfo field
     if (errors.contactInfo) {
@@ -97,21 +110,49 @@ const PostItemPage = () => {
     }
   };
 
-  // Handle image changes (now using the MultiImageUpload component)
-  const handleImagesChange = (newImages) => {
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Create a preview URL for the selected image
+    const previewUrl = URL.createObjectURL(file);
+    
     setFormData(prev => ({
       ...prev,
-      images: newImages
+      imageFile: file,
+      imagePreview: previewUrl
     }));
   };
 
+  const removeImage = () => {
+    // Revoke the URL to prevent memory leaks
+    if (formData.imagePreview) {
+      URL.revokeObjectURL(formData.imagePreview);
+    }
+    
+    setFormData(prev => ({
+      ...prev,
+      imageFile: null,
+      imagePreview: null
+    }));
+  };
+
+  // Updated validate function
   const validate = () => {
     const newErrors = {};
     
     // Common validations
     if (!formData.title.trim()) newErrors.title = 'Title is required';
     if (!formData.description.trim()) newErrors.description = 'Description is required';
-    if (!formData.contactInfo.trim()) newErrors.contactInfo = 'Contact information is required';
+    
+    // Contact info validation based on contact method
+    if (formData.contactMethod === 'both') {
+      if (!formData.contactInfoEmail.trim() && !formData.contactInfoPhone.trim()) {
+        newErrors.contactInfo = 'At least one contact method is required';
+      }
+    } else if (!formData.contactInfo.trim()) {
+      newErrors.contactInfo = 'Contact information is required';
+    }
     
     // Item-specific validations
     if (formData.contentType === 'item') {
@@ -134,7 +175,36 @@ const PostItemPage = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Modified for handling multiple images
+  // Upload image to Supabase Storage
+  const uploadImage = async (file) => {
+    if (!file) return null;
+    
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
+    const filePath = `${fileName}`;  // Change this line
+    
+    try {
+      const { data, error } = await supabase.storage
+        .from('post-images')  // Change this line to match your bucket name
+        .upload(filePath, file);
+      
+      if (error) {
+        throw error;
+      }
+      
+      // Get public URL for the uploaded image
+      const { data: publicUrlData } = supabase.storage
+        .from('post-images')  // Change this line to match your bucket name
+        .getPublicUrl(filePath);
+    
+      return publicUrlData.publicUrl;
+    } catch (error) {
+      console.error('Error uploading image: ', error);
+      return null;
+    }
+  };
+
+  // Modified for anonymous posting with updated contact method handling
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -142,14 +212,16 @@ const PostItemPage = () => {
       setIsSubmitting(true);
       
       try {
-        // Use existing anonymousId from localStorage or generate a new one
-        const anonymousId = localStorage.getItem('anonymousId') || 
-          Math.random().toString(36).substring(2, 15);
-
-        // Store it in localStorage for future use
-        localStorage.setItem('anonymousId', anonymousId);
+        // Upload image if one is selected (for offering items)
+        let imageUrl = null;
+        if (formData.contentType === 'item' && formData.offerType === 'offering' && formData.imageFile) {
+          imageUrl = await uploadImage(formData.imageFile);
+        }
         
-        // Prepare data for database submission - without images
+        // Get or create anonymous ID
+        const anonymousId = AppStorage.getAnonymousId();
+        
+        // Prepare data for database submission with updated contact method handling
         const submissionData = {
           // Use anonymous ID instead of user_id for anonymous posts
           anonymous_id: anonymousId,
@@ -160,10 +232,17 @@ const PostItemPage = () => {
           title: formData.title,
           description: formData.description,
           contact_method: formData.contactMethod,
-          contact_info: formData.contactInfo,
+          // Handle contact info based on method selection
+          contact_info: formData.contactMethod === 'both' 
+            ? JSON.stringify({
+                email: formData.contactInfoEmail,
+                phone: formData.contactInfoPhone
+              }) 
+            : formData.contactInfo,
           event_id: formData.eventId || null,
           is_anonymous: formData.anonymous,
           created_at: new Date().toISOString(),
+          image_url: imageUrl,
           likes: 0,
           comments: 0,
           
@@ -183,18 +262,6 @@ const PostItemPage = () => {
           })
         };
         
-        // For item offerings, set first image as the main image for display in post lists
-        // We'll store all images in the PostImages table
-        if (formData.contentType === 'item' && formData.offerType === 'offering' && formData.images.length > 0) {
-          // Upload all images and get their URLs
-          const uploadedImages = await uploadMultipleImages(formData.images);
-          
-          // Set the first image as the main image for the post
-          if (uploadedImages.length > 0) {
-            submissionData.image_url = uploadedImages[0].url;
-          }
-        }
-        
         console.log("Submitting post with data:", submissionData);
         
         // Insert data into Supabase
@@ -207,28 +274,14 @@ const PostItemPage = () => {
           throw error;
         }
         
-        const postId = data[0].id;
-        
-        // If we have multiple images, save them to the PostImages table
-        if (formData.contentType === 'item' && formData.offerType === 'offering' && formData.images.length > 0) {
-          // Upload all images and get their URLs
-          const uploadedImages = await uploadMultipleImages(formData.images);
-          
-          // Save the images to the PostImages table
-          await savePostImages(postId, uploadedImages);
-        }
-        
-        // Save the anonymousId to localStorage for post management
-        // This allows users to manage their posts without signing in
-        let userPosts = JSON.parse(localStorage.getItem('userPosts') || '[]');
-        userPosts.push({
-          id: postId,
-          anonymousId: anonymousId,
-          title: formData.title,
-          date: new Date().toISOString()
+       // Save the post for management
+        AppStorage.addUserPost({
+         id: data[0].id,
+         anonymousId: anonymousId,
+        title: formData.title,
+        date: new Date().toISOString()
         });
-        localStorage.setItem('userPosts', JSON.stringify(userPosts));
-        
+ 
         alert('Your listing has been posted successfully!');
         navigate('/');
       } catch (error) {
@@ -628,7 +681,7 @@ const PostItemPage = () => {
 
           {/* Right Column */}
           <div>
-            {/* Description */}
+            {/* Description - FIXED: Removed duplicate label */}
             <div className="mb-6">
               <label htmlFor="description" className="block mb-2 text-xl font-semibold" style={{ color: colors.primary }}>
                 Description <span className="text-blue-600">*</span>
@@ -657,26 +710,161 @@ const PostItemPage = () => {
               {errors.description && <p className="mt-1 text-red-500 text-sm">{errors.description}</p>}
             </div>
 
-            {/* Multi-Image Upload (only for offering items) - REPLACED SINGLE IMAGE UPLOAD WITH MULTI-IMAGE */}
+            {/* Image Upload (only for offering items) */}
             {formData.contentType === 'item' && formData.offerType === 'offering' && (
               <div className="mb-6">
                 <label className="block mb-2 text-xl font-semibold" style={{ color: colors.primary }}>
                   Add Images (optional)
                 </label>
                 
-                {/* Use the new MultiImageUpload component */}
-                <MultiImageUpload 
-                  images={formData.images}
-                  setImages={(newImages) => setFormData(prev => ({ ...prev, images: newImages }))}
-                  maxImages={5}
-                />
+                {formData.imagePreview ? (
+                  <div className="mb-3">
+                    <div className="relative w-full h-48 bg-gray-50 rounded-lg overflow-hidden border border-gray-200">
+                      <img 
+                        src={formData.imagePreview} 
+                        alt="Preview" 
+                        className="w-full h-full object-contain"
+                      />
+                      <button
+                        type="button"
+                        className="absolute top-2 right-2 bg-white border border-gray-200 text-gray-600 p-2 rounded-full shadow-sm hover:bg-gray-100 transition-colors"
+                        onClick={removeImage}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div 
+                    className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center cursor-pointer transition-colors hover:border-blue-300 hover:bg-blue-50"
+                    onClick={() => document.getElementById('image-upload').click()}
+                  >
+                    <Upload size={32} className="mx-auto text-blue-400 mb-3" />
+                    <p className="text-gray-600 mb-1">Click to upload an image</p>
+                    <p className="text-gray-400 text-sm">PNG, JPG, or GIF up to 5MB</p>
+                  </div>
+                )}
                 
-                <p className="text-gray-500 text-sm mt-1 flex items-start">
-                  <Info size={14} className="inline mr-1 mt-1 flex-shrink-0" />
-                  <span>Add up to 5 images to showcase your item. First image will be the main image.</span>
-                </p>
+                <input
+                  type="file"
+                  id="image-upload"
+                  accept="image/*"
+                  onChange={handleImageChange}
+                  className="hidden"
+                />
               </div>
             )}
+
+            {/* Contact Method Selection - NEW IMPLEMENTATION */}
+            <div className="mb-6">
+              <label className="block mb-2 text-xl font-semibold" style={{ color: colors.primary }}>
+                Contact Preference <span className="text-blue-600">*</span>
+              </label>
+              
+              {/* Contact Method Buttons */}
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <button
+                  type="button"
+                  className="py-3 px-2 font-medium rounded-lg transition-colors"
+                  style={{ 
+                    backgroundColor: formData.contactMethod === 'email' ? colors.primaryLight : colors.lightGray,
+                    color: formData.contactMethod === 'email' ? colors.primaryDark : colors.textSecondary
+                  }}
+                  onClick={() => handleContactMethodChange('email')}
+                >
+                  Email
+                </button>
+                <button
+                  type="button"
+                  className="py-3 px-2 font-medium rounded-lg transition-colors"
+                  style={{ 
+                    backgroundColor: formData.contactMethod === 'phone' ? colors.primaryLight : colors.lightGray,
+                    color: formData.contactMethod === 'phone' ? colors.primaryDark : colors.textSecondary
+                  }}
+                  onClick={() => handleContactMethodChange('phone')}
+                >
+                  Phone
+                </button>
+                <button
+                  type="button"
+                  className="py-3 px-2 font-medium rounded-lg transition-colors"
+                  style={{ 
+                    backgroundColor: formData.contactMethod === 'both' ? colors.primaryLight : colors.lightGray,
+                    color: formData.contactMethod === 'both' ? colors.primaryDark : colors.textSecondary
+                  }}
+                  onClick={() => handleContactMethodChange('both')}
+                >
+                  Both
+                </button>
+              </div>
+              
+              {/* Contact Info Fields */}
+              {formData.contactMethod === 'email' && (
+                <div>
+                  <input
+                    type="email"
+                    id="contactInfoEmail"
+                    name="contactInfo"
+                    value={formData.contactInfo}
+                    onChange={handleChange}
+                    className={`w-full px-4 py-3 border rounded-lg transition-colors ${
+                      errors.contactInfo ? 'border-red-500' : 'border-gray-200 focus:border-blue-500'
+                    } focus:outline-none`}
+                    placeholder="Enter your email address"
+                  />
+                  {errors.contactInfo && <p className="mt-1 text-red-500 text-sm">{errors.contactInfo}</p>}
+                </div>
+              )}
+              
+              {formData.contactMethod === 'phone' && (
+                <div>
+                  <input
+                    type="tel"
+                    id="contactInfoPhone"
+                    name="contactInfo"
+                    value={formData.contactInfo}
+                    onChange={handleChange}
+                    className={`w-full px-4 py-3 border rounded-lg transition-colors ${
+                      errors.contactInfo ? 'border-red-500' : 'border-gray-200 focus:border-blue-500'
+                    } focus:outline-none`}
+                    placeholder="Enter your phone number"
+                  />
+                  {errors.contactInfo && <p className="mt-1 text-red-500 text-sm">{errors.contactInfo}</p>}
+                </div>
+              )}
+              
+              {formData.contactMethod === 'both' && (
+                <div className="space-y-3">
+                  <div>
+                    <input
+                      type="email"
+                      id="contactInfoEmailBoth"
+                      name="contactInfoEmail"
+                      value={formData.contactInfoEmail || ''}
+                      onChange={(e) => setFormData(prev => ({ ...prev, contactInfoEmail: e.target.value }))}
+                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-blue-500 focus:outline-none"
+                      placeholder="Enter your email address"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="tel"
+                      id="contactInfoPhoneBoth"
+                      name="contactInfoPhone"
+                      value={formData.contactInfoPhone || ''}
+                      onChange={(e) => setFormData(prev => ({ ...prev, contactInfoPhone: e.target.value }))}
+                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-blue-500 focus:outline-none"
+                      placeholder="Enter your phone number"
+                    />
+                  </div>
+                  {errors.contactInfo && <p className="mt-1 text-red-500 text-sm">{errors.contactInfo}</p>}
+                </div>
+              )}
+              
+              <p className="text-gray-500 text-sm mt-1">
+                This information will be visible to users interested in your listing
+              </p>
+            </div>
 
             {/* Associated Event (optional) */}
             <div className="mb-6">
@@ -707,91 +895,35 @@ const PostItemPage = () => {
               </p>
             </div>
 
-            {/* Contact Method Selection */}
-            <div className="mb-6">
-              <label className="block mb-2 text-xl font-semibold" style={{ color: colors.primary }}>
-                Preferred Contact Method <span className="text-blue-600">*</span>
-              </label>
-              
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                <button
-                  type="button"
-                  className={`py-3 px-4 font-medium rounded-lg transition-colors ${
-                    formData.contactMethod === 'email' 
-                      ? 'bg-blue-100 text-blue-800 border-blue-200 border-2' 
-                      : 'bg-gray-100 text-gray-700 border-transparent border-2 hover:bg-gray-200'
-                  }`}
-                  onClick={() => handleContactMethodChange('email')}
-                >
-                  Email
-                </button>
-                <button
-                  type="button"
-                  className={`py-3 px-4 font-medium rounded-lg transition-colors ${
-                    formData.contactMethod === 'phone' 
-                      ? 'bg-blue-100 text-blue-800 border-blue-200 border-2' 
-                      : 'bg-gray-100 text-gray-700 border-transparent border-2 hover:bg-gray-200'
-                  }`}
-                  onClick={() => handleContactMethodChange('phone')}
-                >
-                  Phone
-                </button>
-                <button
-                  type="button"
-                  className={`py-3 px-4 font-medium rounded-lg transition-colors ${
-                    formData.contactMethod === 'chat' 
-                      ? 'bg-blue-100 text-blue-800 border-blue-200 border-2' 
-                      : 'bg-gray-100 text-gray-700 border-transparent border-2 hover:bg-gray-200'
-                  }`}
-                  onClick={() => handleContactMethodChange('chat')}
-                >
-                  In-App Chat
-                </button>
-              </div>
-              
-              <div>
-                <label htmlFor="contactInfo" className="block mb-2 text-sm font-medium text-gray-700">
-                  {formData.contactMethod === 'email' 
-                    ? 'Your Email Address' 
-                    : formData.contactMethod === 'phone' 
-                      ? 'Your Phone Number' 
-                      : 'Username or Preferred Name'
-                  }
-                  <span className="text-blue-600"> *</span>
-                </label>
+            {/* Anonymous Posting Option */}
+            <div className="mb-8">
+              <div className="flex items-center">
                 <input
-                  type={formData.contactMethod === 'email' ? 'email' : 'text'}
-                  id="contactInfo"
-                  name="contactInfo"
-                  value={formData.contactInfo}
+                  type="checkbox"
+                  id="anonymous"
+                  name="anonymous"
+                  checked={formData.anonymous}
                   onChange={handleChange}
-                  className={`w-full px-4 py-3 border rounded-lg transition-colors ${
-                    errors.contactInfo ? 'border-red-500' : 'border-gray-200 focus:border-blue-500'
-                  } focus:outline-none`}
-                  placeholder={
-                    formData.contactMethod === 'email' 
-                      ? 'your@email.com' 
-                      : formData.contactMethod === 'phone' 
-                        ? '(555) 123-4567' 
-                        : 'Enter your preferred contact name'
-                  }
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                 />
-                {errors.contactInfo && <p className="mt-1 text-red-500 text-sm">{errors.contactInfo}</p>}
+                <label htmlFor="anonymous" className="ml-2 text-gray-700 font-medium">
+                  Post anonymously
+                </label>
               </div>
+              <p className="text-gray-500 text-sm mt-1 ml-6">
+                Your name won't be associated with this listing
+              </p>
             </div>
-
+            
             {/* Submit Button */}
             <div className="mt-8">
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className={`w-full py-3 px-4 rounded-lg text-white font-medium transition-colors ${
-                  isSubmitting 
-                    ? 'bg-blue-400 cursor-not-allowed' 
-                    : 'bg-blue-600 hover:bg-blue-700'
-                }`}
+                className="w-full py-4 px-8 text-white font-semibold rounded-lg shadow-md focus:outline-none transition-colors"
+                style={{ backgroundColor: isSubmitting ? colors.mediumGray : colors.primary }}
               >
-                {isSubmitting ? 'Posting...' : 'Post Listing'}
+                {isSubmitting ? 'Publishing...' : 'Publish Listing'}
               </button>
             </div>
           </div>

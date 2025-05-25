@@ -1,6 +1,7 @@
 // PostComments.jsx - Integrated version
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { AppStorage } from '../utils/storage';
 
 const PostComments = ({ postId }) => {
   const [comments, setComments] = useState([]);
@@ -32,15 +33,9 @@ const PostComments = ({ postId }) => {
       )
       .subscribe();
       
-    // Generate anonymous ID if not already in local storage
-    const storedAnonymousId = localStorage.getItem('anonymousId');
-    if (storedAnonymousId) {
-      setAnonymousId(storedAnonymousId);
-    } else {
-      const newAnonymousId = `anon-${Math.random().toString(36).substring(2, 10)}`;
-      localStorage.setItem('anonymousId', newAnonymousId);
-      setAnonymousId(newAnonymousId);
-    }
+   // Get or create anonymous ID
+const anonymousId = AppStorage.getAnonymousId();
+setAnonymousId(anonymousId);
     
     return () => {
       subscription.unsubscribe();

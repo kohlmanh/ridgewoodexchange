@@ -2,33 +2,28 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Clock, Edit, Trash, ArrowLeft } from 'lucide-react';
-import { getUserPosts, deleteAnonymousPost } from '../utils/postManagement';
+import { AppStorage, useUserPosts } from '../utils/storage';
 
 const MyPostsPage = () => {
   const navigate = useNavigate();
-  const [userPosts, setUserPosts] = useState([]);
+  const { posts: userPosts, removePost } = useUserPosts();
   const [postDetails, setPostDetails] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
-  // Fetch user posts from localStorage and then get details from Supabase
   useEffect(() => {
     const fetchPosts = async () => {
       try {
         setLoading(true);
         
-        // Get posts created by this user from localStorage
-        const savedPosts = getUserPosts();
-        
-        if (savedPosts.length === 0) {
-          setUserPosts([]);
+        if (userPosts.length === 0) {
           setLoading(false);
           return;
         }
         
         // Get post IDs
-        const postIds = savedPosts.map(post => post.id);
+        const postIds = userPosts.map(post => post.id);
         
         // Fetch full post details from Supabase
         const { data, error } = await supabase
@@ -38,17 +33,16 @@ const MyPostsPage = () => {
         
         if (error) throw error;
         
-        // Combine the database data with the localStorage data
-        // (to get the anonymous_id which is needed for editing/deleting)
+        // Combine the database data with the local storage data
         const postsWithDetails = data.map(dbPost => {
-          const localPost = savedPosts.find(p => p.id === dbPost.id);
+          const localPost = userPosts.find(p => p.id === dbPost.id);
           return {
             ...dbPost,
             anonymousId: localPost?.anonymousId
           };
         });
         
-        setUserPosts(postsWithDetails);
+        setPostDetails(postsWithDetails);
       } catch (err) {
         console.error('Error fetching posts:', err);
         setError('Failed to load your posts. Please try again later.');
@@ -58,16 +52,29 @@ const MyPostsPage = () => {
     };
     
     fetchPosts();
-  }, []);
+  }, [userPosts]); // ← Note the dependency change
 
   // Function to handle post deletion
   const handleDelete = async (postId, anonymousId) => {
     if (deleteConfirm === postId) {
       try {
-        await deleteAnonymousPost(postId, anonymousId);
+        // Set the anonymous ID as a configuration parameter
+        await supabase.rpc('set_config', {
+          parameter: 'app.anonymous_id',
+          value: anonymousId
+        });
         
-        // Update the UI after deletion
-        setUserPosts(userPosts.filter(post => post.id !== postId));
+        // Perform the delete operation
+        const { error } = await supabase
+          .from('Posts')
+          .delete()
+          .eq('id', postId)
+          .eq('anonymous_id', anonymousId);
+        
+        if (error) throw error;
+        
+        // Remove the post from local storage
+        removePost(postId);
         
         // Reset delete confirmation
         setDeleteConfirm(null);
@@ -84,16 +91,14 @@ const MyPostsPage = () => {
   // Function to navigate to edit page
   const handleEdit = (post) => {
     // Store the post details in localStorage for the edit page
-    localStorage.setItem('editPost', JSON.stringify({
-      id: post.id,
-      anonymousId: post.anonymousId,
-      title: post.title,
-      description: post.description,
-      // Add other fields you want to edit
-      contentType: post.content_type,
-      offerType: post.offer_type,
-      // etc.
-    }));
+   AppStorage.setItem('editPost', {
+  id: post.id,
+  anonymousId: post.anonymousId,
+  title: post.title,
+  description: post.description,
+  contentType: post.content_type,
+  offerType: post.offer_type,
+});
     
     navigate(`/post/edit/${post.id}`);
   };
@@ -129,7 +134,7 @@ const MyPostsPage = () => {
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
           {error}
         </div>
-      ) : userPosts.length === 0 ? (
+      ) : postDetails.length === 0 ? (
         <div className="text-center py-12 bg-gray-50 rounded-lg">
           <h3 className="text-2xl font-semibold text-gray-700 mb-3">No Posts Yet</h3>
           <p className="text-xl text-gray-600 mb-6">You haven't created any posts on this device</p>
@@ -145,7 +150,7 @@ const MyPostsPage = () => {
         </div>
       ) : (
         <div className="space-y-6">
-          {userPosts.map(post => (
+          {postDetails.map(post => (
             <div key={post.id} className="border border-gray-200 rounded-lg shadow-sm overflow-hidden">
               <div className="bg-white p-6">
                 <div className="flex justify-between items-start">
