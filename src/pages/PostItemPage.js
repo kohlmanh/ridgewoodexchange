@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Upload, Info, X, Clock, DollarSign, Users } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
-import { AppStorage } from '../utils/storage';
+import { AppStorage } from '../utils/AppStorage';
 
 const PostItemPage = () => {
   const navigate = useNavigate();

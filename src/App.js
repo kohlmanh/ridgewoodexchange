@@ -1,18 +1,18 @@
 import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
-import Header from './components/header';
+import Header from './components/Header';
 import Footer from './components/Footer';
 import HomePage from './pages/HomePage';
 import PostItemPage from './pages/PostItemPage';
 import PostDetailPage from './components/PostDetailPage';
 import ItemDetailPage from './pages/ItemDetailPage';
 import ProfilePage from './pages/ProfilePage';
-import LoginPage from './pages/LoginPage';
 import AboutPage from './pages/AboutPage';
 import CommunityFeed from './pages/CommunityFeed';
 import MyPostsPage from './pages/MyPostsPage';
 import EditPostPage from './pages/EditPostPage';
-import PersistentPostsAccess from './components/PersistentPostsAccess'; // Add this import
+import MessagesPage from './components/MessagesPage'; // Add this import
+import PersistentPostsAccess from './components/PersistentPostsAccess';
 
 // ScrollToTop component
 function ScrollToTop() {
@@ -45,14 +45,13 @@ function App() {
             <Route path="/communityfeed" element={<CommunityFeed />} />
             <Route path="/item/:id" element={<ItemDetailPage />} />
             <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/login" element={<LoginPage />} />
-            {/* Add new routes for anonymous posting features */}
             <Route path="/my-posts" element={<MyPostsPage />} />
             <Route path="/post/edit/:postId" element={<EditPostPage />} />
+            <Route path="/messages" element={<MessagesPage />} /> {/* Add this route */}
           </Routes>
         </main>
         <Footer />
-        <PersistentPostsAccess /> {/* Add this component */}
+        <PersistentPostsAccess />
       </div>
     </Router>
   );

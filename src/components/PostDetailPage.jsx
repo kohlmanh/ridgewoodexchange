@@ -1,4 +1,4 @@
-// Integrated PostDetailPage.jsx
+// Integrated PostDetailPage.jsx - FIXED VERSION
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Clock, DollarSign, Users, Info, ArrowLeft, Share, MapPin, User } from 'lucide-react';
@@ -72,15 +72,21 @@ const PostDetailPage = () => {
           setImages([postData.image_url]);
         }
         
-        // Fetch post owner details
+        // ✅ FIXED: Fetch post owner details (NO MORE PROFILES TABLE CALLS)
         if (postData.user_id) {
-          const { data: ownerData } = await supabase
-            .from('profiles')
-            .select('username, full_name, avatar_url')
-            .eq('id', postData.user_id)
-            .single();
-            
-          setPostOwner(ownerData);
+          // Set a default owner object since we don't have profiles table
+          setPostOwner({
+            username: postData.user_name || 'User',
+            full_name: postData.user_name || 'User',
+            avatar_url: null
+          });
+        } else {
+          // Anonymous post
+          setPostOwner({
+            username: 'Anonymous',
+            full_name: 'Anonymous',
+            avatar_url: null
+          });
         }
         
         setLoading(false);

@@ -1,4 +1,6 @@
-// utils/storage.js - Centralized storage management with fallbacks
+import { useState, useEffect } from 'react';
+
+// utils/AppStorage.js - Centralized storage management with fallbacks
 
 class Storage {
   constructor() {
@@ -116,11 +118,15 @@ export const AppStorage = {
     return posts;
   },
 
-  // Anonymous ID management
+  // ============================================
+  // ENHANCED ANONYMOUS IDENTITY MANAGEMENT
+  // ============================================
+  
+  // Anonymous ID management (enhanced)
   getAnonymousId() {
     let anonymousId = storage.getItem('anonymousId');
     if (!anonymousId) {
-      anonymousId = `anon-${Math.random().toString(36).substring(2, 15)}`;
+      anonymousId = `anon-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
       this.setAnonymousId(anonymousId);
     }
     return anonymousId;
@@ -129,6 +135,87 @@ export const AppStorage = {
   setAnonymousId(id) {
     storage.setItem('anonymousId', id);
   },
+
+  // Anonymous user profile management
+  getAnonymousProfile() {
+    return storage.getItem('anonymousProfile') || {
+      anonymousId: this.getAnonymousId(),
+      displayName: null,
+      createdAt: new Date().toISOString(),
+      lastActive: new Date().toISOString()
+    };
+  },
+
+  setAnonymousProfile(profile) {
+    const currentProfile = this.getAnonymousProfile();
+    const updatedProfile = {
+      ...currentProfile,
+      ...profile,
+      anonymousId: this.getAnonymousId(), // Ensure ID consistency
+      lastActive: new Date().toISOString()
+    };
+    storage.setItem('anonymousProfile', updatedProfile);
+    return updatedProfile;
+  },
+
+  // Anonymous conversations management
+  getAnonymousConversations() {
+    return storage.getItem('anonymousConversations') || [];
+  },
+
+  addAnonymousConversation(conversation) {
+    const conversations = this.getAnonymousConversations();
+    const exists = conversations.find(c => c.id === conversation.id);
+    if (!exists) {
+      conversations.unshift(conversation);
+      storage.setItem('anonymousConversations', conversations);
+    }
+    return conversations;
+  },
+
+  updateAnonymousConversation(conversationId, updates) {
+    const conversations = this.getAnonymousConversations();
+    const index = conversations.findIndex(c => c.id === conversationId);
+    if (index !== -1) {
+      conversations[index] = { ...conversations[index], ...updates };
+      storage.setItem('anonymousConversations', conversations);
+    }
+    return conversations;
+  },
+
+  removeAnonymousConversation(conversationId) {
+    const conversations = this.getAnonymousConversations().filter(c => c.id !== conversationId);
+    storage.setItem('anonymousConversations', conversations);
+    return conversations;
+  },
+
+  // Anonymous interests tracking
+  getAnonymousInterests() {
+    return storage.getItem('anonymousInterests') || [];
+  },
+
+  addAnonymousInterest(interest) {
+    const interests = this.getAnonymousInterests();
+    const exists = interests.find(i => i.postId === interest.postId);
+    if (!exists) {
+      interests.unshift({
+        ...interest,
+        timestamp: new Date().toISOString()
+      });
+      storage.setItem('anonymousInterests', interests);
+    }
+    return interests;
+  },
+
+  // Check if user has expressed interest in a post
+  hasExpressedInterest(postId) {
+    const interests = this.getAnonymousInterests();
+    return interests.some(i => i.postId === postId);
+  },
+
+  // ============================================
+  // EXISTING METHODS (keep these)
+  // ============================================
 
   // User preferences
   getUserPreferences() {
@@ -157,20 +244,59 @@ export const AppStorage = {
     storage.removeItem('draftPost');
   },
 
+  // Generic storage methods for any data
+  setItem(key, value) {
+    storage.setItem(key, value);
+  },
+
+  getItem(key) {
+    return storage.getItem(key);
+  },
+
+  removeItem(key) {
+    storage.removeItem(key);
+  },
+
   // Debug info
   getStorageInfo() {
+    const profile = this.getAnonymousProfile();
     return {
       type: storage.getStorageType(),
       isAvailable: storage.isLocalStorageAvailable,
       userPosts: this.getUserPosts().length,
-      anonymousId: this.getAnonymousId()
+      anonymousId: this.getAnonymousId(),
+      anonymousProfile: profile,
+      conversations: this.getAnonymousConversations().length,
+      interests: this.getAnonymousInterests().length
     };
+  },
+
+  // Cleanup old data (optional maintenance)
+  cleanupOldData(daysOld = 30) {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+    
+    // Clean old conversations
+    const conversations = this.getAnonymousConversations();
+    const recentConversations = conversations.filter(c => {
+      const lastMessage = new Date(c.lastMessageAt || c.createdAt);
+      return lastMessage > cutoffDate;
+    });
+    storage.setItem('anonymousConversations', recentConversations);
+    
+    // Clean old interests
+    const interests = this.getAnonymousInterests();
+    const recentInterests = interests.filter(i => {
+      const timestamp = new Date(i.timestamp);
+      return timestamp > cutoffDate;
+    });
+    storage.setItem('anonymousInterests', recentInterests);
+    
+    console.log(`Cleaned up data older than ${daysOld} days`);
   }
 };
 
 // React hook for storage with automatic updates
-import { useState, useEffect } from 'react';
-
 export const useAppStorage = (key, defaultValue = null) => {
   const [value, setValue] = useState(() => {
     return AppStorage[`get${key}`] ? AppStorage[`get${key}`]() : defaultValue;
@@ -216,6 +342,63 @@ export const useUserPosts = () => {
     removePost,
     refreshPosts,
     hasPosts: posts.length > 0
+  };
+};
+
+// Custom hook for anonymous profile
+export const useAnonymousProfile = () => {
+  const [profile, setProfile] = useState(() => AppStorage.getAnonymousProfile());
+
+  const updateProfile = (updates) => {
+    const updatedProfile = AppStorage.setAnonymousProfile(updates);
+    setProfile(updatedProfile);
+    return updatedProfile;
+  };
+
+  const refreshProfile = () => {
+    setProfile(AppStorage.getAnonymousProfile());
+  };
+
+  return {
+    profile,
+    updateProfile,
+    refreshProfile,
+    anonymousId: profile.anonymousId,
+    displayName: profile.displayName,
+    hasDisplayName: !!profile.displayName
+  };
+};
+
+// Custom hook for anonymous conversations
+export const useAnonymousConversations = () => {
+  const [conversations, setConversations] = useState(() => AppStorage.getAnonymousConversations());
+
+  const addConversation = (conversation) => {
+    const updatedConversations = AppStorage.addAnonymousConversation(conversation);
+    setConversations(updatedConversations);
+  };
+
+  const updateConversation = (conversationId, updates) => {
+    const updatedConversations = AppStorage.updateAnonymousConversation(conversationId, updates);
+    setConversations(updatedConversations);
+  };
+
+  const removeConversation = (conversationId) => {
+    const updatedConversations = AppStorage.removeAnonymousConversation(conversationId);
+    setConversations(updatedConversations);
+  };
+
+  const refreshConversations = () => {
+    setConversations(AppStorage.getAnonymousConversations());
+  };
+
+  return {
+    conversations,
+    addConversation,
+    updateConversation,
+    removeConversation,
+    refreshConversations,
+    hasConversations: conversations.length > 0
   };
 };
 

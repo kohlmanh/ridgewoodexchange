@@ -1,7 +1,9 @@
-// PostComments.jsx - Integrated version
+// PostComments.jsx - FINAL VERSION MATCHING YOUR EXACT TABLE STRUCTURE
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { AppStorage } from '../utils/storage';
+import { AppStorage } from '../utils/AppStorage';
+
+console.log('✅ POSTCOMMENTS LOADED - WORKING VERSION');
 
 const PostComments = ({ postId }) => {
   const [comments, setComments] = useState([]);
@@ -9,7 +11,6 @@ const PostComments = ({ postId }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [user, setUser] = useState(null);
-  const [username, setUsername] = useState('');
   const [anonymousId, setAnonymousId] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   
@@ -33,9 +34,9 @@ const PostComments = ({ postId }) => {
       )
       .subscribe();
       
-   // Get or create anonymous ID
-const anonymousId = AppStorage.getAnonymousId();
-setAnonymousId(anonymousId);
+    // Get or create anonymous ID - ONLY FROM LOCAL STORAGE
+    const anonId = AppStorage.getAnonymousId();
+    setAnonymousId(anonId);
     
     return () => {
       subscription.unsubscribe();
@@ -48,17 +49,6 @@ setAnonymousId(anonymousId);
     if (data.user) {
       setUser(data.user);
       setIsAuthenticated(true);
-      
-      // Fetch username if available
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('username, full_name')
-        .eq('id', data.user.id)
-        .single();
-        
-      if (profileData) {
-        setUsername(profileData.username || profileData.full_name || data.user.email);
-      }
     } else {
       setIsAuthenticated(false);
     }
@@ -90,51 +80,38 @@ setAnonymousId(anonymousId);
     setError(null);
     
     try {
+      // MINIMAL comment data - only the essential fields
       const commentData = {
-        post_id: postId,
+        post_id: parseInt(postId),
         content: newComment.trim(),
+        user_name: isAuthenticated ? (user?.email?.split('@')[0] || 'User') : 'Anonymous'
       };
       
-      // Set user data based on authentication status
-      if (isAuthenticated) {
+      // Add user identification - only ONE field
+      if (isAuthenticated && user?.id) {
         commentData.user_id = user.id;
-        commentData.user_name = username;
       } else {
-        commentData.user_name = 'Anonymous';
         commentData.anonymous_id = anonymousId;
       }
       
-      const { error } = await supabase
+      // Insert the comment
+      const { data, error } = await supabase
         .from('Comments')
         .insert(commentData);
         
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
       
       // Clear input field
       setNewComment('');
       
-      // Notify post owner (optional)
-      const { data: postData } = await supabase
-        .from('Posts')
-        .select('user_id, title')
-        .eq('id', postId)
-        .single();
-        
-      if (postData && postData.user_id && postData.user_id !== user?.id) {
-        await supabase
-          .from('UserNotifications')
-          .insert({
-            recipient_id: postData.user_id,
-            sender_id: user?.id || null,
-            type: 'comment',
-            content: `New comment on your post "${postData.title}"`,
-            post_id: postId,
-            read: false
-          });
-      }
+      // Refresh comments to show the new one
+      await fetchComments();
+      
     } catch (err) {
       console.error('Error submitting comment:', err);
-      setError('Failed to submit comment. Please try again.');
+      setError(`Failed to submit comment: ${err.message}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -171,7 +148,7 @@ setAnonymousId(anonymousId);
         </div>
         
         {error && (
-          <div className="text-red-500 text-sm mb-2">
+          <div className="text-red-500 text-sm mb-2 bg-red-50 p-2 rounded">
             {error}
           </div>
         )}
@@ -184,14 +161,9 @@ setAnonymousId(anonymousId);
           {isSubmitting ? 'Posting...' : 'Post Comment'}
         </button>
         
-        {!isAuthenticated && (
-          <p className="text-sm text-gray-500 mt-2">
-            You are commenting as Anonymous. 
-            <a href="/login" className="text-blue-600 hover:underline ml-1">
-              Sign in
-            </a> to use your name.
-          </p>
-        )}
+        <p className="text-sm text-gray-500 mt-2">
+          {isAuthenticated ? `Posting as ${user?.email}` : 'Posting anonymously'}
+        </p>
       </form>
       
       {/* Comments List */}

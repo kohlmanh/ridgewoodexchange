@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useUserPosts } from '../utils/storage';
+import { useUserPosts } from '../utils/AppStorage';
+
 
 const PersistentPostsAccess = () => {
   const { hasPosts } = useUserPosts();
